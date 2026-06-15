@@ -1,0 +1,56 @@
+{
+  "name": "matesel-job-orchestrator",
+  "version": "1.0.1",
+  "description": "Orchestrator for MateSel batch jobs",
+  "main": "./out/main/index.js",
+  "author": "Adam Lloyd",
+  "scripts": {
+    "dev": "node scripts/electron-vite-dev.cjs",
+    "test": "vitest run",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "package": "electron-vite build && electron-builder"
+  },
+  "dependencies": {
+    "electron-store": "^8.2.0",
+    "uuid": "^9.0.1",
+    "zustand": "^4.5.2"
+  },
+  "devDependencies": {
+    "@electron-toolkit/tsconfig": "^1.0.1",
+    "@types/node": "^20.14.0",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@types/uuid": "^9.0.8",
+    "@vitejs/plugin-react": "^5.2.0",
+    "autoprefixer": "^10.4.19",
+    "electron": "^42.0.0",
+    "electron-builder": "^26.8.1",
+    "electron-vite": "^5.0.0",
+    "postcss": "^8.4.38",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tailwindcss": "^3.4.4",
+    "typescript": "^5.5.2",
+    "vite": "^7.3.3",
+    "vitest": "^4.1.5"
+  },
+  "build": {
+    "appId": "com.matesel.orchestrator",
+    "productName": "MateSel Orchestrator",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "out/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

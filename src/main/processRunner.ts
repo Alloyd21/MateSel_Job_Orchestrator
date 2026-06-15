@@ -1,0 +1,520 @@
+import { spawn, spawnSync, ChildProcess } from 'child_process'
+import os from 'os'
+import path from 'path'
+import fs from 'fs'
+import { BrowserWindow } from 'electron'
+import { IPC } from './ipc/channels'
+import { copyInputFiles, prepareMateSelDataFile } from './fileManager'
+
+export type JobCompleteCallback = (jobId: string, status: 'done' | 'failed', exitCode: number) => void
+export type JobStatusCallback = (patch: Record<string, unknown>) => void
+export type JobLogCallback = (text: string) => void
+
+const CONSOLE_POLL_INTERVAL_MS = 1000
+const CANCEL_TIMEOUT_MS = 5000
+
+const runningProcesses = new Map<string, ChildProcess>()
+const consolePollers = new Map<string, NodeJS.Timeout>()
+const orphanedPids = new Map<string, number>()
+const completionPollers = new Map<string, NodeJS.Timeout>()
+
+// CPU core pool: each running worker is pinned to its own logical core so the
+// OS scheduler stops bouncing them between cores and they don't fight over the
+// same caches. os.cpus() reports logical processors (physical cores * threads).
+const totalCores = os.cpus().length
+const freeCores: number[] = Array.from({ length: totalCores }, (_, i) => i)
+const jobCores = new Map<string, number>()
+
+// Returns a free logical core index for this job, or undefined when every core
+// is already taken (more concurrent workers than cores) — those run unpinned.
+function acquireCore(jobId: string): number | undefined {
+  const core = freeCores.shift()
+  if (core != null) jobCores.set(jobId, core)
+  return core
+}
+
+function releaseCore(jobId: string): void {
+  const core = jobCores.get(jobId)
+  if (core == null) return
+  jobCores.delete(jobId)
+  freeCores.push(core)
+}
+
+// Sets the worker's CPU affinity to a single logical core via PowerShell.
+// BigInt builds the bitmask so it stays correct past 31 cores (JS bit-shifts
+// are 32-bit); ProcessorAffinity is a 64-bit IntPtr on 64-bit Windows.
+function setProcessAffinity(pid: number, coreIndex: number): void {
+  const mask = (1n << BigInt(coreIndex)).toString()
+  const command = `
+for ($i = 0; $i -lt 20; $i++) {
+  try {
+    $process = Get-Process -Id ${pid} -ErrorAction Stop
+    $process.ProcessorAffinity = [IntPtr]${mask}
+    break
+  } catch {
+    Start-Sleep -Milliseconds 100
+  }
+}
+`
+  const child = spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', command], {
+    windowsHide: true,
+    stdio: 'ignore'
+  })
+  child.unref()
+}
+
+// Raises the worker above other apps (ABOVE_NORMAL, not HIGH/REALTIME which can
+// starve the OS) and pins it to a dedicated core when one is available.
+// Priority is only raised when threads outnumber active jobs so workers don't
+// contend with each other at elevated priority.
+function applyPerformanceTuning(
+  pid: number,
+  coreIndex: number | undefined,
+  raisePriority: boolean,
+  sendLog: (text: string) => void
+): void {
+  if (raisePriority) {
+    try {
+      os.setPriority(pid, os.constants.priority.PRIORITY_ABOVE_NORMAL)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      sendLog(`[Orchestrator] Could not raise process priority: ${msg}\n`)
+    }
+  }
+
+  if (coreIndex != null) {
+    setProcessAffinity(pid, coreIndex)
+    sendLog(
+      `[Orchestrator] Pinned worker to CPU core ${coreIndex} of ${totalCores}${raisePriority ? ', priority Above Normal' : ''}.\n`
+    )
+  } else {
+    sendLog(
+      `[Orchestrator] All ${totalCores} cores assigned; worker runs unpinned${raisePriority ? ' at priority Above Normal' : ''}.\n`
+    )
+  }
+}
+
+const fatalOutputPatterns = [
+  /could not find token file/i,
+  /engine authentication inputs are invalid/i,
+  /forrtl:\s+severe/i,
+  /access violation/i,
+  /\bstopping\./i
+]
+
+function detectMateSelStage(text: string): string | undefined {
+  const lowerText = text.toLowerCase()
+  const frontierPointMatches = [...lowerText.matchAll(/frontier point calc #\s*(\d+)/g)]
+  const latestFrontierPoint = frontierPointMatches.at(-1)
+  const frontierPointIndex = latestFrontierPoint?.index ?? -1
+  const frontierPointNumber = latestFrontierPoint ? Number(latestFrontierPoint[1]) : NaN
+  const frontierProgress =
+    Number.isFinite(frontierPointNumber) && frontierPointNumber > 0
+      ? Math.min(90, Math.max(0, Math.round(frontierPointNumber * 9)))
+      : undefined
+  const matches = [
+    { index: lowerText.lastIndexOf('inbreeding coefficients'), stage: 'Calculating Inbreeding' },
+    { index: lowerText.lastIndexOf('frontierstarted'), stage: 'Calculating Frontier' },
+    {
+      index: frontierPointIndex,
+      stage:
+        frontierProgress == null
+          ? 'Calculating Frontier'
+          : `Calculating Frontier ${frontierProgress}%`
+    },
+    { index: lowerText.lastIndexOf('frontierdone'), stage: 'Optimising Matings' }
+  ].filter((match) => match.index >= 0)
+
+  if (matches.length === 0) return undefined
+  return matches.sort((a, b) => b.index - a.index)[0].stage
+}
+
+function hasFatalMateSelOutput(text: string): boolean {
+  return fatalOutputPatterns.some((pattern) => pattern.test(text))
+}
+
+// Called once at startup — runs tasklist to get a reliable snapshot of all running PIDs.
+export function getRunningPidSet(): Set<number> {
+  const pids = new Set<number>()
+  try {
+    const result = spawnSync('tasklist', ['/NH', '/FO', 'CSV'], {
+      windowsHide: true,
+      encoding: 'utf8',
+      timeout: 10000
+    })
+    if (!result.error && result.status === 0) {
+      for (const line of (result.stdout as string).split(/\r?\n/)) {
+        const match = line.match(/^"[^"]+","(\d+)"/)
+        if (match) pids.add(Number(match[1]))
+      }
+    }
+  } catch { /* ignore */ }
+  return pids
+}
+
+// Used by completion pollers — fast per-PID check (non-blocking).
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code
+    if (code === 'EPERM' || code === 'EACCES') return true
+    return false
+  }
+}
+
+function readConsoleLog(outputDir: string): string {
+  const consolePath = path.join(outputDir, 'Console.txt')
+  if (!fs.existsSync(consolePath)) return ''
+
+  try {
+    return fs.readFileSync(consolePath, 'utf8')
+  } catch {
+    return ''
+  }
+}
+
+function findConsoleLogPath(outputDir: string, exeDir: string): string | undefined {
+  const outputConsolePath = path.join(outputDir, 'Console.txt')
+  if (fs.existsSync(outputConsolePath)) return outputConsolePath
+
+  const exeConsolePath = path.join(exeDir, 'Console.txt')
+  if (fs.existsSync(exeConsolePath)) return exeConsolePath
+
+  return undefined
+}
+
+function readFileSlice(filePath: string, start: number): { text: string; position: number } {
+  const stats = fs.statSync(filePath)
+  const position = stats.size
+  if (position <= start) return { text: '', position }
+
+  const buffer = Buffer.alloc(position - start)
+  const fd = fs.openSync(filePath, 'r')
+  try {
+    fs.readSync(fd, buffer, 0, buffer.length, start)
+  } finally {
+    fs.closeSync(fd)
+  }
+
+  return { text: buffer.toString('utf8'), position }
+}
+
+function startConsoleLogStreaming(
+  jobId: string,
+  outputDir: string,
+  exeDir: string,
+  sendLog: (text: string) => void,
+  handleStageText: (text: string) => void
+): void {
+  let consolePath: string | undefined
+  let position = 0
+
+  const poller = setInterval(() => {
+    try {
+      const activeConsolePath = findConsoleLogPath(outputDir, exeDir)
+      if (!activeConsolePath) return
+
+      if (activeConsolePath !== consolePath) {
+        consolePath = activeConsolePath
+        position = 0
+        sendLog(`[Orchestrator] Streaming ${consolePath}\n`)
+      }
+
+      const slice = readFileSlice(consolePath, position)
+      position = slice.position
+      if (slice.text) {
+        handleStageText(slice.text)
+        sendLog(slice.text)
+      }
+    } catch {
+      // MateSel can briefly lock Console.txt while writing it. Try again on the next poll.
+    }
+  }, CONSOLE_POLL_INTERVAL_MS)
+
+  consolePollers.set(jobId, poller)
+}
+
+function stopConsoleLogStreaming(jobId: string): void {
+  const poller = consolePollers.get(jobId)
+  if (!poller) return
+
+  clearInterval(poller)
+  consolePollers.delete(jobId)
+}
+
+function stopCompletionPolling(jobId: string): void {
+  const poller = completionPollers.get(jobId)
+  if (!poller) return
+
+  clearInterval(poller)
+  completionPollers.delete(jobId)
+}
+
+function saveConsoleLogToJobFolder(outputDir: string, jobFolder: string, fallbackText: string): void {
+  if (path.resolve(outputDir) === path.resolve(jobFolder)) return
+
+  const outputConsolePath = path.join(outputDir, 'Console.txt')
+  const jobConsolePath = path.join(jobFolder, 'Console.txt')
+
+  if (fs.existsSync(outputConsolePath)) {
+    fs.copyFileSync(outputConsolePath, jobConsolePath)
+    return
+  }
+
+  if (fallbackText.trim()) {
+    fs.writeFileSync(jobConsolePath, fallbackText)
+  }
+}
+
+function findExistingFile(folderPath: string, fileName: string): string | undefined {
+  const match = fs.readdirSync(folderPath).find((entry) => entry.toLowerCase() === fileName.toLowerCase())
+  return match ? path.join(folderPath, match) : undefined
+}
+
+function ensureMateSelToken(exePath: string): void {
+  const exeDir = path.dirname(exePath)
+  if (!findExistingFile(exeDir, 'RunToken.txt')) {
+    throw new Error(`MateSel batch token not found. Put RunToken.txt beside ${exePath}.`)
+  }
+}
+
+function minimizeProcessWindow(pid: number): void {
+  const command = `
+$signature = '[DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);'
+Add-Type -MemberDefinition $signature -Name Win32ShowWindowAsync -Namespace Native
+for ($i = 0; $i -lt 20; $i++) {
+  $process = Get-Process -Id ${pid} -ErrorAction SilentlyContinue
+  if ($process -and $process.MainWindowHandle -ne 0) {
+    [Native.Win32ShowWindowAsync]::ShowWindowAsync($process.MainWindowHandle, 2) | Out-Null
+    break
+  }
+  Start-Sleep -Milliseconds 250
+}
+`
+
+  spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', command], {
+    windowsHide: true,
+    stdio: 'ignore'
+  })
+}
+
+function startJob(
+  win: BrowserWindow,
+  jobFolder: string,
+  jobId: string,
+  outputDir: string,
+  exePath: string,
+  dataFileName: string | undefined,
+  raisePriority: boolean,
+  onComplete: JobCompleteCallback,
+  onStatus: JobStatusCallback,
+  onLog: JobLogCallback
+): void {
+  const preparedDataFileName = prepareMateSelDataFile(outputDir, dataFileName, onLog)
+  const dataFilePath = path.join(outputDir, preparedDataFileName)
+  const exeDir = path.dirname(exePath)
+
+  const child = spawn(exePath, [dataFilePath], {
+    cwd: exeDir,
+    windowsHide: true,
+    detached: true
+  })
+  child.unref()
+
+  runningProcesses.set(jobId, child)
+
+  const sendLog = (text: string): void => {
+    onLog(text)
+  }
+
+  if (child.pid) {
+    applyPerformanceTuning(child.pid, acquireCore(jobId), raisePriority, sendLog)
+    minimizeProcessWindow(child.pid)
+  }
+
+  const sendStatus = (patch: object): void => {
+    onStatus(patch as Record<string, unknown>)
+  }
+
+  let currentStage: string | null = null
+  const handleStageText = (text: string): void => {
+    const nextStage = detectMateSelStage(text)
+    if (!nextStage || nextStage === currentStage) return
+
+    currentStage = nextStage
+    sendStatus({ stage: nextStage })
+  }
+
+  sendStatus({ status: 'running', startedAt: Date.now(), stage: null, pid: child.pid })
+
+  let processOutput = ''
+  const handleOutput = (data: Buffer): void => {
+    const text = data.toString()
+    processOutput += text
+    handleStageText(text)
+    sendLog(text)
+  }
+
+  child.stdout?.on('data', handleOutput)
+  child.stderr?.on('data', handleOutput)
+  startConsoleLogStreaming(jobId, outputDir, exeDir, sendLog, handleStageText)
+
+  child.on('close', (code) => {
+    runningProcesses.delete(jobId)
+    releaseCore(jobId)
+    stopConsoleLogStreaming(jobId)
+    const exitCode = code ?? -1
+    const consoleOutput = readConsoleLog(outputDir) || readConsoleLog(exeDir)
+    const hasFatalOutput = hasFatalMateSelOutput(`${processOutput}\n${consoleOutput}`)
+    const status = exitCode === 0 && !hasFatalOutput ? 'done' : 'failed'
+    try {
+      saveConsoleLogToJobFolder(outputDir, jobFolder, consoleOutput || processOutput)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      sendLog(`[Orchestrator] Failed to save Console.txt to job folder: ${msg}\n`)
+    }
+    if (hasFatalOutput) {
+      sendLog('[Orchestrator] MateSel reported a fatal error despite the process exit code.\n')
+    }
+    sendStatus({ status, exitCode, finishedAt: Date.now(), stage: null })
+    onComplete(jobId, status, exitCode)
+  })
+
+  child.on('error', (err) => {
+    runningProcesses.delete(jobId)
+    releaseCore(jobId)
+    stopConsoleLogStreaming(jobId)
+    sendLog(`[Orchestrator] Failed to start process: ${err.message}\n`)
+    sendStatus({ status: 'failed', exitCode: -1, finishedAt: Date.now(), stage: null })
+    onComplete(jobId, 'failed', -1)
+  })
+}
+
+export function prepareAndStart(
+  win: BrowserWindow,
+  jobFolder: string,
+  outputDir: string,
+  jobId: string,
+  exePath: string,
+  dataFileName: string | undefined,
+  raisePriority: boolean,
+  onComplete: JobCompleteCallback,
+  onStatus?: JobStatusCallback,
+  onLog?: JobLogCallback
+): void {
+  const sendStatus = onStatus ?? ((patch): void => {
+    win.webContents.send(IPC.JOB_STATUS_UPDATE, { id: jobId, ...patch })
+  })
+  const sendLog = onLog ?? ((text): void => {
+    win.webContents.send(IPC.JOB_LOG_CHUNK, { jobId, text })
+  })
+
+  try {
+    if (path.resolve(jobFolder) !== path.resolve(outputDir)) {
+      copyInputFiles(jobFolder, outputDir)
+    }
+    ensureMateSelToken(exePath)
+    startJob(win, jobFolder, jobId, outputDir, exePath, dataFileName, raisePriority, onComplete, sendStatus, sendLog)
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    sendStatus({
+      status: 'failed',
+      exitCode: -1,
+      finishedAt: Date.now(),
+      stage: null
+    })
+    sendLog(`[Orchestrator] Setup error: ${msg}\n`)
+    onComplete(jobId, 'failed', -1)
+  }
+}
+
+export function reattachToRunningJob(
+  jobId: string,
+  pid: number,
+  outputDir: string,
+  jobFolder: string,
+  exePath: string,
+  onComplete: JobCompleteCallback,
+  onStatus: JobStatusCallback,
+  onLog: JobLogCallback
+): void {
+  const exeDir = path.dirname(exePath)
+  orphanedPids.set(jobId, pid)
+
+  let currentStage: string | null = null
+  const handleStageText = (text: string): void => {
+    const nextStage = detectMateSelStage(text)
+    if (!nextStage || nextStage === currentStage) return
+    currentStage = nextStage
+    onStatus({ stage: nextStage })
+  }
+
+  onLog(`[Orchestrator] Reconnected to running MateSel process (PID: ${pid}).\n`)
+  startConsoleLogStreaming(jobId, outputDir, exeDir, onLog, handleStageText)
+
+  const poller = setInterval(() => {
+    if (isProcessAlive(pid)) return
+
+    clearInterval(poller)
+    completionPollers.delete(jobId)
+    orphanedPids.delete(jobId)
+    stopConsoleLogStreaming(jobId)
+
+    const consoleOutput = readConsoleLog(outputDir) || readConsoleLog(exeDir)
+    const hasFatalOutput = hasFatalMateSelOutput(consoleOutput)
+    const status: 'done' | 'failed' = hasFatalOutput ? 'failed' : 'done'
+    const exitCode = hasFatalOutput ? -1 : 0
+
+    if (hasFatalOutput) {
+      onLog('[Orchestrator] MateSel reported a fatal error.\n')
+    }
+    try {
+      saveConsoleLogToJobFolder(outputDir, jobFolder, consoleOutput)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      onLog(`[Orchestrator] Failed to save Console.txt to job folder: ${msg}\n`)
+    }
+    onStatus({ status, exitCode, finishedAt: Date.now(), stage: null })
+    onComplete(jobId, status, exitCode)
+  }, CONSOLE_POLL_INTERVAL_MS * 2)
+
+  completionPollers.set(jobId, poller)
+}
+
+export function cancelProcess(jobId: string, stopExePath: string): void {
+  stopCompletionPolling(jobId)
+
+  const child = runningProcesses.get(jobId)
+  if (!child) {
+    const pid = orphanedPids.get(jobId)
+    if (pid != null) {
+      if (fs.existsSync(stopExePath)) {
+        spawn(stopExePath, [], { windowsHide: true })
+        setTimeout(() => {
+          try { process.kill(pid) } catch { /* already gone */ }
+        }, CANCEL_TIMEOUT_MS)
+      } else {
+        try { process.kill(pid) } catch { /* already gone */ }
+      }
+      orphanedPids.delete(jobId)
+    }
+    stopConsoleLogStreaming(jobId)
+    return
+  }
+
+  if (fs.existsSync(stopExePath)) {
+    spawn(stopExePath, [], { windowsHide: true })
+    const timeout = setTimeout(() => {
+      if (runningProcesses.has(jobId)) child.kill()
+    }, CANCEL_TIMEOUT_MS)
+    child.on('close', () => {
+      clearTimeout(timeout)
+      stopConsoleLogStreaming(jobId)
+    })
+  } else {
+    child.kill()
+    stopConsoleLogStreaming(jobId)
+  }
+}
