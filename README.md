@@ -136,6 +136,12 @@ Job history and recent console lines are cached with `electron-store` using the 
 - `Console.txt` may appear in the output directory or MateSel install directory; the app checks both.
 - `out/` and `dist/` are generated build artifacts.
 
+## Citation
+
+If you use MateSel Job Orchestrator in research, please cite:
+
+Lloyd, A. (2026). MateSel Job Orchestrator: A desktop application for staging and running MateSel batch jobs. Version 1.0.0. GitHub. https://github.com/Alloyd21/MateSel_Job_Orchestrator
+
 ## Disclaimer
 
 This tool is an independent GUI/orchestration utility and is not affiliated with, endorsed by, or sponsored by MateSel. MateSel and all related intellectual property, trademarks, software, documentation, and rights remain the property of MateSel and its respective owners. Users must ensure they have the appropriate rights and licenses to use MateSel. Licences avaliable to purchase via https://www.matesel.com/

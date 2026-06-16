@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+message: "If you use MateSel Job Orchestrator in research, please cite it using this metadata."
+type: software
+title: "MateSel Job Orchestrator"
+abstract: "A Windows desktop application for staging and running MateSel batch jobs."
+authors:
+  - family-names: "Lloyd"
+    given-names: "Adam"
+year: 2026
+version: "1.0.1"
+date-released: "2026-06-16"
+url: "https://github.com/Alloyd21/MateSel_Job_Orchestrator"
