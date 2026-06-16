@@ -96,6 +96,49 @@ describe('prepareMateSelDataFile', () => {
     )
   })
 
+  it('parses quoted comma fields without corrupting CSV columns', () => {
+    writeFile('DataFile.csv', ['ID,Sex,Trait', '"Animal,One",F,2'].join('\n'))
+
+    prepareMateSelDataFile(tempDir)
+
+    expect(fs.readFileSync(path.join(tempDir, 'Matesel.txt'), 'utf8')).toBe(
+      ['ID Sex Trait', 'Animal,One F 2', ''].join('\r\n')
+    )
+  })
+
+  it('parses escaped quotes inside quoted CSV fields', () => {
+    writeFile('DataFile.csv', ['ID,Sex,Trait', '"Animal""A""",M,4'].join('\n'))
+
+    prepareMateSelDataFile(tempDir)
+
+    expect(fs.readFileSync(path.join(tempDir, 'Matesel.txt'), 'utf8')).toBe(
+      ['ID Sex Trait', 'Animal"A" M 4', ''].join('\r\n')
+    )
+  })
+
+  it('removes a UTF-8 BOM from the first CSV header', () => {
+    writeFile('DataFile.csv', ['\ufeffID,Sex,Trait', 'A1,U,3'].join('\n'))
+
+    prepareMateSelDataFile(tempDir)
+
+    expect(fs.readFileSync(path.join(tempDir, 'Matesel.txt'), 'utf8')).toBe(
+      ['ID Sex Trait', 'A1 0 3', ''].join('\r\n')
+    )
+  })
+
+  it('keeps existing unquoted CSV normalization with CRLF input and blank trailing records', () => {
+    writeFile(
+      'DataFile.csv',
+      ['ID,Sire,Dam,Sex,MatingGroup,g_marker,EBV', 'Animal1,,,U,,U,1.2300000000', '', ''].join('\r\n')
+    )
+
+    prepareMateSelDataFile(tempDir)
+
+    expect(fs.readFileSync(path.join(tempDir, 'Matesel.txt'), 'utf8')).toBe(
+      ['ID Sire Dam Sex MatingGroup g_marker EBV', 'Animal1 0 0 0 0 0 1.23', ''].join('\r\n')
+    )
+  })
+
   it('passes through recognised text inputs without rewriting them', () => {
     writeFile('Matesel.txt', 'existing content')
 

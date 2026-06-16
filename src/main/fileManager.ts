@@ -101,6 +101,72 @@ function normalizeMateSelValue(header: string, value: string): string {
   return formatNumeric(trimmed)
 }
 
+interface CsvRecord {
+  fields: string[]
+  hasContent: boolean
+}
+
+function parseCsvRecords(content: string): CsvRecord[] {
+  const csv = content.charCodeAt(0) === 0xfeff ? content.slice(1) : content
+  const records: CsvRecord[] = []
+  let record: string[] = []
+  let field = ''
+  let inQuotes = false
+  let recordStarted = false
+  let recordHasContent = false
+
+  const finishRecord = (): void => {
+    record.push(field)
+    records.push({ fields: record, hasContent: recordHasContent })
+    record = []
+    field = ''
+    recordStarted = false
+    recordHasContent = false
+  }
+
+  for (let index = 0; index < csv.length; index += 1) {
+    const char = csv[index]
+    recordStarted = true
+
+    if (inQuotes) {
+      if (char.trim()) recordHasContent = true
+      if (char === '"') {
+        if (csv[index + 1] === '"') {
+          field += '"'
+          index += 1
+        } else {
+          inQuotes = false
+        }
+      } else {
+        field += char
+      }
+      continue
+    }
+
+    if (char === '"' && field === '') {
+      recordHasContent = true
+      inQuotes = true
+    } else if (char === ',') {
+      recordHasContent = true
+      record.push(field)
+      field = ''
+    } else if (char === '\r') {
+      if (csv[index + 1] === '\n') index += 1
+      finishRecord()
+    } else if (char === '\n') {
+      finishRecord()
+    } else {
+      if (char.trim()) recordHasContent = true
+      field += char
+    }
+  }
+
+  if (inQuotes) throw new Error('CSV data file contains an unterminated quoted field')
+  if (recordStarted || record.length > 0 || field) finishRecord()
+
+  return records
+}
+
 export function prepareMateSelDataFile(
   outputDir: string,
   selectedDataFileName?: string,
@@ -116,14 +182,15 @@ export function prepareMateSelDataFile(
 
   if (!/\.csv$/i.test(dataFileName)) return dataFileName
 
-  const lines = fs.readFileSync(sourcePath, 'utf8').split(/\r?\n/).filter((line) => line.trim())
-  if (lines.length === 0) throw new Error(`Data file is empty: ${sourcePath}`)
+  const records = parseCsvRecords(fs.readFileSync(sourcePath, 'utf8'))
+    .filter((record) => record.hasContent)
+    .map((record) => record.fields)
+  if (records.length === 0) throw new Error(`Data file is empty: ${sourcePath}`)
 
-  const headers = lines[0].split(',').map((header) => header.trim())
+  const headers = records[0].map((header) => header.trim())
   const normalizedLines = [
     headers.join(' '),
-    ...lines.slice(1).map((line) => {
-      const values = line.split(',')
+    ...records.slice(1).map((values) => {
       return headers.map((header, index) => normalizeMateSelValue(header, values[index] ?? '')).join(' ')
     })
   ]
