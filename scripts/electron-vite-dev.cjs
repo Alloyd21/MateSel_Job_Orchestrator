@@ -8,13 +8,13 @@ const electronViteBin = path.join(
   __dirname,
   '..',
   'node_modules',
-  '.bin',
-  process.platform === 'win32' ? 'electron-vite.cmd' : 'electron-vite'
+  'electron-vite',
+  'bin',
+  'electron-vite.js'
 )
 
-const child = spawn(electronViteBin, ['dev', ...process.argv.slice(2)], {
+const child = spawn(process.execPath, [electronViteBin, 'dev', ...process.argv.slice(2)], {
   env,
-  shell: process.platform === 'win32',
   stdio: 'inherit'
 })
 
