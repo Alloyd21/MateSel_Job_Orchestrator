@@ -80,6 +80,7 @@ interface RunChange {
 }
 
 const MAX_RUNS_WITHOUT_CONFIRM = 500
+export const MAX_GENERATED_BATCH_RUNS = 1000
 const numericPattern = '[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?'
 
 function hasFileCaseInsensitive(folderPath: string, fileName: string): boolean {
@@ -432,6 +433,15 @@ function getCombinationCount(expanded: ExpandedVariation[]): number {
   return expanded.reduce((total, variation) => total * variation.values.length, 1)
 }
 
+function validateCombinationCount(combinationCount: number): void {
+  if (!Number.isFinite(combinationCount) || !Number.isSafeInteger(combinationCount)) {
+    throw new Error('Batch combination count is too large to generate safely.')
+  }
+  if (combinationCount > MAX_GENERATED_BATCH_RUNS) {
+    throw new Error(`Batch would create ${combinationCount} runs, exceeding the absolute limit of ${MAX_GENERATED_BATCH_RUNS}.`)
+  }
+}
+
 export function generateBatchJobs(request: BatchGenerateRequest): BatchGenerateResult {
   if (!fs.existsSync(request.starterFolder)) throw new Error('Starter folder does not exist')
   if (!fs.existsSync(request.destinationParent)) throw new Error('Destination parent does not exist')
@@ -461,6 +471,7 @@ export function generateBatchJobs(request: BatchGenerateRequest): BatchGenerateR
   if (expanded.length === 0) throw new Error('Select at least one weighting value to vary')
 
   const combinationCount = getCombinationCount(expanded)
+  validateCombinationCount(combinationCount)
   if (combinationCount > MAX_RUNS_WITHOUT_CONFIRM && !request.allowLargeBatch) {
     throw new Error(`Batch would create ${combinationCount} runs. Confirm large batch generation to continue.`)
   }

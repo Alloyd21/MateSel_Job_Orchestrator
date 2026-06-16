@@ -6,6 +6,7 @@ import {
   expandBatchVariationValues,
   generateBatchJobs,
   inspectBatchStarter,
+  MAX_GENERATED_BATCH_RUNS,
   parseInpOneGroup
 } from './batchGenerator'
 
@@ -218,6 +219,78 @@ describe('generateBatchJobs', () => {
           variations: [{ rowId: trait.id, endUseIndex: 0, mode: 'list', value: valueList }]
         })
       ).toThrow(/Confirm large batch/)
+    } finally {
+      fs.rmSync(destinationParent, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects allowLargeBatch runs above the absolute cap', () => {
+    writeFile('Matesel.ini', 'config')
+    writeFile('InpOneGroup.txt', inpOneGroup)
+    writeFile('DataFile.csv', 'ID,Sex\nA,F\n')
+    const destinationParent = fs.mkdtempSync(path.join(os.tmpdir(), 'matesel-batch-dest-'))
+    const valueList = Array.from({ length: MAX_GENERATED_BATCH_RUNS + 1 }, (_, index) => String(index)).join(',')
+    const trait = inspectBatchStarter(tempDir).traits[0]
+
+    try {
+      expect(() =>
+        generateBatchJobs({
+          starterFolder: tempDir,
+          destinationParent,
+          variations: [{ rowId: trait.id, endUseIndex: 0, mode: 'list', value: valueList }],
+          allowLargeBatch: true
+        })
+      ).toThrow(/absolute limit/)
+    } finally {
+      fs.rmSync(destinationParent, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects unsafe combination counts before generation', () => {
+    writeFile('Matesel.ini', 'config')
+    writeFile('InpOneGroup.txt', inpOneGroup)
+    writeFile('DataFile.csv', 'ID,Sex\nA,F\n')
+    const destinationParent = fs.mkdtempSync(path.join(os.tmpdir(), 'matesel-batch-dest-'))
+    const trait = inspectBatchStarter(tempDir).traits[0]
+
+    try {
+      expect(() =>
+        generateBatchJobs({
+          starterFolder: tempDir,
+          destinationParent,
+          variations: Array.from({ length: 4 }, () => ({
+            rowId: trait.id,
+            endUseIndex: 0,
+            mode: 'range' as const,
+            value: '0-9999',
+            increment: '1'
+          })),
+          allowLargeBatch: true
+        })
+      ).toThrow(/too large to generate safely/)
+    } finally {
+      fs.rmSync(destinationParent, { recursive: true, force: true })
+    }
+  })
+
+  it('generates confirmed batches below the absolute cap', () => {
+    writeFile('Matesel.ini', 'config')
+    writeFile('InpOneGroup.txt', inpOneGroup)
+    writeFile('DataFile.csv', 'ID,Sex\nA,F\n')
+    const destinationParent = fs.mkdtempSync(path.join(os.tmpdir(), 'matesel-batch-dest-'))
+    const valueList = Array.from({ length: 501 }, (_, index) => String(index)).join(',')
+    const trait = inspectBatchStarter(tempDir).traits[0]
+
+    try {
+      const result = generateBatchJobs({
+        starterFolder: tempDir,
+        destinationParent,
+        variations: [{ rowId: trait.id, endUseIndex: 0, mode: 'list', value: valueList }],
+        allowLargeBatch: true
+      })
+
+      expect(result.generatedFolders).toHaveLength(501)
+      expect(fs.existsSync(path.join(result.generatedFolders[500], 'BatchChanges.txt'))).toBe(true)
     } finally {
       fs.rmSync(destinationParent, { recursive: true, force: true })
     }
