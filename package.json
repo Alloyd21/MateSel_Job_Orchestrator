@@ -4,6 +4,8 @@
   "description": "Orchestrator for MateSel batch jobs",
   "main": "./out/main/index.js",
   "author": "Adam Lloyd",
+  "license": "SEE LICENSE IN LICENSE.md",
+  "licenseName": "PolyForm Noncommercial License 1.0.0",
   "scripts": {
     "dev": "node scripts/electron-vite-dev.cjs",
     "test": "vitest run",

@@ -136,11 +136,19 @@ Job history and recent console lines are cached with `electron-store` using the 
 - `Console.txt` may appear in the output directory or MateSel install directory; the app checks both.
 - `out/` and `dist/` are generated build artifacts.
 
+## License
+
+MateSel Job Orchestrator is licensed under the PolyForm Noncommercial License 1.0.0.
+
+You may use, fork, modify, and share this software for non-commercial purposes, including research and education. Commercial use, resale, or use in a commercial product or service is not permitted without written permission from the author.
+
+If you use this software in research, please cite it using the citation information in `CITATION.cff`.
+
 ## Citation
 
 If you use MateSel Job Orchestrator in research, please cite:
 
-Lloyd, A. (2026). MateSel Job Orchestrator: A desktop application for staging and running MateSel batch jobs. Version 1.0.0. GitHub. https://github.com/Alloyd21/MateSel_Job_Orchestrator
+Lloyd, A. (2026). MateSel Job Orchestrator: A desktop application for staging and running MateSel batch jobs. Version 1.0.1. GitHub. https://github.com/Alloyd21/MateSel_Job_Orchestrator
 
 ## Disclaimer
 
