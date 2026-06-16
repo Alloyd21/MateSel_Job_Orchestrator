@@ -1,7 +1,7 @@
 import path from 'path'
+import { randomUUID } from 'node:crypto'
 import { BrowserWindow } from 'electron'
 import Store from 'electron-store'
-import { v4 as uuidv4 } from 'uuid'
 import { IPC } from './ipc/channels'
 import { createOutputDir, findMateSelDataFileName, readBatchChanges, type BatchChangeRow } from './fileManager'
 import { prepareAndStart, cancelProcess, getRunningPidSet, reattachToRunningJob } from './processRunner'
@@ -141,7 +141,7 @@ export function enqueue(jobFolder: string, dataFileName?: string): void {
   const name = path.basename(jobFolder)
   const resolvedDataFileName = dataFileName ?? resolveDataFileName(jobFolder)
   const job: QueuedJob = {
-    id: uuidv4(),
+    id: randomUUID(),
     name,
     jobFolder,
     outputDir: '',
