@@ -469,11 +469,15 @@ export function reattachToRunningJob(
 
     const consoleOutput = readConsoleLog(outputDir) || readConsoleLog(exeDir)
     const hasFatalOutput = hasFatalMateSelOutput(consoleOutput)
-    const status: 'done' | 'failed' = hasFatalOutput ? 'failed' : 'done'
-    const exitCode = hasFatalOutput ? -1 : 0
+    const status: 'failed' = 'failed'
+    const exitCode = -1
 
     if (hasFatalOutput) {
       onLog('[Orchestrator] MateSel reported a fatal error.\n')
+    } else {
+      onLog(
+        '[Orchestrator] Reattached MateSel process exited, but the original exit code is unavailable. Marking this job failed; review Console.txt and output files before treating it as complete.\n'
+      )
     }
     try {
       saveConsoleLogToJobFolder(outputDir, jobFolder, consoleOutput)
