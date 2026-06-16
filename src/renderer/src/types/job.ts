@@ -1,5 +1,13 @@
 export type JobStatus = 'ready' | 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
 
+export interface BatchChangeRow {
+  item: string
+  type: string
+  endUse: string
+  defaultValue: string
+  thisRun: string
+}
+
 export interface Job {
   id: string
   name: string
@@ -12,6 +20,7 @@ export interface Job {
   finishedAt?: number | null
   exitCode?: number | null
   log: string[]
+  batchChanges?: BatchChangeRow[]
 }
 
 export interface Settings {

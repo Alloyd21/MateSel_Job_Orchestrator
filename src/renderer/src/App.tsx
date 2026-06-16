@@ -3,6 +3,7 @@ import { useJobStore } from './store/jobStore'
 import { JobQueuePanel } from './components/JobQueuePanel'
 import { JobDetailPanel } from './components/JobDetailPanel'
 import { AddJobsDialog } from './components/AddJobsDialog'
+import { BatchGeneratorDialog } from './components/BatchGeneratorDialog'
 import { SettingsModal } from './components/SettingsModal'
 import type { Job, JobStatus } from './types/job'
 import type { AddJobRequest, AddJobResult } from './globals'
@@ -12,6 +13,7 @@ const terminalStatuses: JobStatus[] = ['done', 'failed', 'cancelled']
 export default function App(): JSX.Element {
   const { jobs, selectedJobId, selectJob, applyStatusUpdate, appendLog } = useJobStore()
   const [showAddJobs, setShowAddJobs] = useState(false)
+  const [showBatchGenerator, setShowBatchGenerator] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
 
   useEffect(() => {
@@ -85,6 +87,12 @@ export default function App(): JSX.Element {
             Settings
           </button>
           <button
+            onClick={() => setShowBatchGenerator(true)}
+            className="px-3 py-1.5 text-xs rounded bg-slate-700 hover:bg-slate-600 text-slate-200"
+          >
+            Batch Generator
+          </button>
+          <button
             onClick={() => setShowAddJobs(true)}
             className="px-3 py-1.5 text-xs rounded bg-blue-600 hover:bg-blue-500 text-white font-medium"
           >
@@ -122,6 +130,9 @@ export default function App(): JSX.Element {
           onClose={() => setShowAddJobs(false)}
           onAdd={handleAddJobs}
         />
+      )}
+      {showBatchGenerator && (
+        <BatchGeneratorDialog onClose={() => setShowBatchGenerator(false)} />
       )}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
     </div>

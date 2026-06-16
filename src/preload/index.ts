@@ -3,6 +3,21 @@ import { IPC } from '../main/ipc/channels'
 
 contextBridge.exposeInMainWorld('mateselAPI', {
   getAllJobs: () => ipcRenderer.invoke(IPC.JOBS_GET_ALL),
+  inspectBatchStarter: (starterFolder: string) =>
+    ipcRenderer.invoke(IPC.BATCH_INSPECT_STARTER, starterFolder),
+  generateBatchJobs: (payload: {
+    starterFolder: string
+    destinationParent: string
+    selectedDataFileName?: string
+    variations: Array<{
+      rowId: string
+      endUseIndex: number
+      mode: 'value' | 'range' | 'list'
+      value: string
+      increment?: string
+    }>
+    allowLargeBatch?: boolean
+  }) => ipcRenderer.invoke(IPC.BATCH_GENERATE, payload),
   addJobs: (jobs: Array<string | { folder: string; dataFileName?: string }>) =>
     ipcRenderer.invoke(IPC.JOB_ADD, jobs),
   cancelJob: (jobId: string) => ipcRenderer.invoke(IPC.JOB_CANCEL, jobId),

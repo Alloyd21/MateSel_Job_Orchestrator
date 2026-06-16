@@ -7,6 +7,7 @@ import {
   findMateSelDataFileName,
   listJobFolderFiles,
   prepareMateSelDataFile,
+  readBatchChanges,
   validateJobFolder
 } from './fileManager'
 
@@ -195,6 +196,48 @@ describe('validateJobFolder', () => {
       valid: true,
       warnings: []
     })
+  })
+})
+
+describe('readBatchChanges', () => {
+  it('returns parsed batch change rows when BatchChanges.txt has the generated table', () => {
+    writeFile(
+      'BatchChanges.txt',
+      [
+        'Job: run_0001',
+        'Batch weighting changes compared with starter defaults',
+        '',
+        'Item\tType\tEndUse\tDefault\tThis run',
+        'Polled allele N\tmarker\t1\t-2.5\t-3',
+        'WT_Birth\ttrait\t2\t0\t1',
+        ''
+      ].join('\r\n')
+    )
+
+    expect(readBatchChanges(tempDir)).toEqual([
+      {
+        item: 'Polled allele N',
+        type: 'marker',
+        endUse: '1',
+        defaultValue: '-2.5',
+        thisRun: '-3'
+      },
+      {
+        item: 'WT_Birth',
+        type: 'trait',
+        endUse: '2',
+        defaultValue: '0',
+        thisRun: '1'
+      }
+    ])
+  })
+
+  it('returns no rows when BatchChanges.txt is missing or does not contain the table header', () => {
+    expect(readBatchChanges(tempDir)).toEqual([])
+
+    writeFile('BatchChanges.txt', 'Notes only')
+
+    expect(readBatchChanges(tempDir)).toEqual([])
   })
 })
 

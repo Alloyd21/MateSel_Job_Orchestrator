@@ -41,6 +41,38 @@ function getRunId(outputDir: string): string {
   return parts.at(-1) ?? '-'
 }
 
+function BatchChangesTable({ rows }: { rows: NonNullable<Job['batchChanges']> }): JSX.Element {
+  return (
+    <div>
+      <div className="mb-1 text-xs text-slate-500">Batch Changes</div>
+      <div className="max-h-44 overflow-auto rounded border border-slate-700 bg-slate-950">
+        <table className="w-full min-w-[640px] text-left text-xs">
+          <thead className="sticky top-0 bg-slate-800 text-slate-400">
+            <tr>
+              <th className="px-2 py-1.5 font-medium">Item</th>
+              <th className="px-2 py-1.5 font-medium">Type</th>
+              <th className="px-2 py-1.5 font-medium">EndUse</th>
+              <th className="px-2 py-1.5 font-medium">Default</th>
+              <th className="px-2 py-1.5 font-medium">This run</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-800 text-slate-200">
+            {rows.map((row, index) => (
+              <tr key={`${row.item}-${row.endUse}-${index}`}>
+                <td className="px-2 py-1.5">{row.item}</td>
+                <td className="px-2 py-1.5 text-slate-300">{row.type}</td>
+                <td className="px-2 py-1.5 font-mono text-slate-300">{row.endUse}</td>
+                <td className="px-2 py-1.5 font-mono text-slate-300">{row.defaultValue}</td>
+                <td className="px-2 py-1.5 font-mono text-slate-100">{row.thisRun}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 export function JobDetailPanel({
   job,
   onCancel,
@@ -54,6 +86,7 @@ export function JobDetailPanel({
   const canRestart = job.status === 'failed'
   const canOpenOutputDir = Boolean(job.outputDir)
   const runId = job.outputDir ? getRunId(job.outputDir) : '-'
+  const batchChanges = job.batchChanges ?? []
 
   const handleOpenOutputDir = async (): Promise<void> => {
     if (!job.outputDir) return
@@ -133,6 +166,8 @@ export function JobDetailPanel({
           </div>
         )}
       </div>
+
+      {batchChanges.length > 0 && <BatchChangesTable rows={batchChanges} />}
 
       <div className="flex-1 min-h-0">
         <div className="text-xs text-slate-500 mb-1 flex items-center justify-between">

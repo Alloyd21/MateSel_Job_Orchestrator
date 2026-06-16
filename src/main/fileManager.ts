@@ -1,6 +1,14 @@
 import fs from 'fs'
 import path from 'path'
 
+export interface BatchChangeRow {
+  item: string
+  type: string
+  endUse: string
+  defaultValue: string
+  thisRun: string
+}
+
 export function createOutputDir(outputRoot: string, jobName: string): string {
   const timestamp = new Date()
     .toISOString()
@@ -11,6 +19,36 @@ export function createOutputDir(outputRoot: string, jobName: string): string {
   const fullPath = path.join(outputRoot, dirName)
   fs.mkdirSync(fullPath, { recursive: true })
   return fullPath
+}
+
+function findFileNameCaseInsensitive(folderPath: string, fileName: string): string | undefined {
+  try {
+    return fs.readdirSync(folderPath).find((entry) => entry.toLowerCase() === fileName.toLowerCase())
+  } catch {
+    return undefined
+  }
+}
+
+export function readBatchChanges(folderPath: string): BatchChangeRow[] {
+  const fileName = findFileNameCaseInsensitive(folderPath, 'BatchChanges.txt')
+  if (!fileName) return []
+
+  const content = fs.readFileSync(path.join(folderPath, fileName), 'utf8')
+  const lines = content.split(/\r?\n/)
+  const headerIndex = lines.findIndex((line) => line.trim() === 'Item\tType\tEndUse\tDefault\tThis run')
+  if (headerIndex === -1) return []
+
+  return lines
+    .slice(headerIndex + 1)
+    .map((line) => line.split('\t'))
+    .filter((columns) => columns.length >= 5 && columns.some((column) => column.trim()))
+    .map(([item, type, endUse, defaultValue, thisRun]) => ({
+      item: item.trim(),
+      type: type.trim(),
+      endUse: endUse.trim(),
+      defaultValue: defaultValue.trim(),
+      thisRun: thisRun.trim()
+    }))
 }
 
 export function copyInputFiles(jobFolder: string, outputDir: string): void {

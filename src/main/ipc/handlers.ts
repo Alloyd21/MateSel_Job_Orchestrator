@@ -3,6 +3,7 @@ import { IPC } from './channels'
 import { store } from '../store'
 import { enqueue, cancel, cancelAll, clearCompleted, getAllJobs, restartFailed, start, startAll } from '../jobQueue'
 import { discoverJobFolders, validateJobFolder } from '../fileManager'
+import { generateBatchJobs, inspectBatchStarter, type BatchVariationSpec } from '../batchGenerator'
 
 interface AddJobRequest {
   folder: string
@@ -17,12 +18,32 @@ interface AddJobResult {
   files?: string[]
 }
 
+interface BatchGeneratePayload {
+  starterFolder: string
+  destinationParent: string
+  selectedDataFileName?: string
+  variations: BatchVariationSpec[]
+  allowLargeBatch?: boolean
+}
+
 function normalizeAddJobRequest(request: string | AddJobRequest): AddJobRequest {
   return typeof request === 'string' ? { folder: request } : request
 }
 
 export function registerHandlers(win: BrowserWindow): void {
   ipcMain.handle(IPC.JOBS_GET_ALL, () => getAllJobs())
+
+  ipcMain.handle(IPC.BATCH_INSPECT_STARTER, (_event, starterFolder: string) => {
+    return inspectBatchStarter(starterFolder)
+  })
+
+  ipcMain.handle(IPC.BATCH_GENERATE, (_event, payload: BatchGeneratePayload) => {
+    const result = generateBatchJobs(payload)
+    for (const folder of result.generatedFolders) {
+      enqueue(folder, result.dataFileName)
+    }
+    return result
+  })
 
   ipcMain.handle(IPC.JOB_ADD, (_event, jobRequests: Array<string | AddJobRequest>) => {
     const requests = jobRequests.map(normalizeAddJobRequest)

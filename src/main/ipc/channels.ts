@@ -9,6 +9,8 @@ export const IPC = {
   JOB_STATUS_UPDATE: 'job:status-update',
   JOB_LOG_CHUNK: 'job:log-chunk',
   JOBS_GET_ALL: 'jobs:get-all',
+  BATCH_INSPECT_STARTER: 'batch:inspect-starter',
+  BATCH_GENERATE: 'batch:generate',
   SETTINGS_GET: 'settings:get',
   SETTINGS_SET: 'settings:set',
   DIALOG_OPEN_FOLDER: 'dialog:open-folder',

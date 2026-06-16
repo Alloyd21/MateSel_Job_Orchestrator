@@ -38,7 +38,8 @@ export const useJobStore = create<JobStore>((set) => ({
         startedAt: patch.startedAt,
         finishedAt: patch.finishedAt,
         exitCode: patch.exitCode,
-        log: patch.log ?? []
+        log: patch.log ?? [],
+        batchChanges: patch.batchChanges
       }
       return { jobs: [...state.jobs, newJob] }
     }),

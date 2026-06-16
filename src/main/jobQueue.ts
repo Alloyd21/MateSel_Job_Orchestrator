@@ -3,7 +3,7 @@ import { BrowserWindow } from 'electron'
 import Store from 'electron-store'
 import { v4 as uuidv4 } from 'uuid'
 import { IPC } from './ipc/channels'
-import { createOutputDir, findMateSelDataFileName } from './fileManager'
+import { createOutputDir, findMateSelDataFileName, readBatchChanges, type BatchChangeRow } from './fileManager'
 import { prepareAndStart, cancelProcess, getRunningPidSet, reattachToRunningJob } from './processRunner'
 import { store } from './store'
 
@@ -20,6 +20,7 @@ export interface QueuedJob {
   exitCode?: number
   pid?: number
   log: string[]
+  batchChanges: BatchChangeRow[]
 }
 
 interface JobCache {
@@ -48,12 +49,21 @@ function resolveDataFileName(jobFolder: string, fallback?: string): string | und
   }
 }
 
+function resolveBatchChanges(jobFolder: string): BatchChangeRow[] {
+  try {
+    return readBatchChanges(jobFolder)
+  } catch {
+    return []
+  }
+}
+
 const queue: QueuedJob[] = jobCache.get('jobs', []).map((job) => {
   const resolvedDataFileName = resolveDataFileName(job.jobFolder, job.dataFileName)
+  const batchChanges = resolveBatchChanges(job.jobFolder)
   if (job.status === 'running' && job.pid != null && alivePids.has(job.pid)) {
     console.log(`[Recovery] "${job.name}" PID ${job.pid} still running — will reattach`)
     pendingReattach.push(job.id)
-    return { ...job, dataFileName: resolvedDataFileName, log: job.log ?? [] }
+    return { ...job, dataFileName: resolvedDataFileName, log: job.log ?? [], batchChanges }
   }
   if (job.status === 'running' || job.status === 'queued') {
     console.log(`[Recovery] "${job.name}" PID ${job.pid ?? 'none'} not found — marking cancelled`)
@@ -66,7 +76,8 @@ const queue: QueuedJob[] = jobCache.get('jobs', []).map((job) => {
       job.status === 'running' || job.status === 'queued'
         ? job.finishedAt ?? Date.now()
         : job.finishedAt,
-    log: job.log ?? []
+    log: job.log ?? [],
+    batchChanges
   }
 })
 const runningIds = new Set<string>(pendingReattach)
@@ -137,7 +148,8 @@ export function enqueue(jobFolder: string, dataFileName?: string): void {
     dataFileName: resolvedDataFileName,
     status: 'ready',
     stage: null,
-    log: []
+    log: [],
+    batchChanges: resolveBatchChanges(jobFolder)
   }
   queue.push(job)
   persistJobs()
