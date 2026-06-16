@@ -260,6 +260,11 @@ function onJobComplete(jobId: string, status: 'done' | 'failed', exitCode: numbe
   runningIds.delete(jobId)
   const job = queue.find((j) => j.id === jobId)
   if (job) {
+    if (job.status === 'cancelled') {
+      tick()
+      return
+    }
+
     job.status = status
     job.exitCode = exitCode
     job.finishedAt = Date.now()
