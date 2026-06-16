@@ -17,6 +17,7 @@ const runningProcesses = new Map<string, ChildProcess>()
 const consolePollers = new Map<string, NodeJS.Timeout>()
 const orphanedPids = new Map<string, number>()
 const completionPollers = new Map<string, NodeJS.Timeout>()
+const cancellingJobs = new Set<string>()
 
 // CPU core pool: each running worker is pinned to its own logical core so the
 // OS scheduler stops bouncing them between cores and they don't fight over the
@@ -375,6 +376,8 @@ function startJob(
       const msg = err instanceof Error ? err.message : String(err)
       sendLog(`[Orchestrator] Failed to save Console.txt to job folder: ${msg}\n`)
     }
+    if (cancellingJobs.delete(jobId)) return
+
     if (hasFatalOutput) {
       sendLog('[Orchestrator] MateSel reported a fatal error despite the process exit code.\n')
     }
@@ -386,6 +389,8 @@ function startJob(
     runningProcesses.delete(jobId)
     releaseCore(jobId)
     stopConsoleLogStreaming(jobId)
+    if (cancellingJobs.delete(jobId)) return
+
     sendLog(`[Orchestrator] Failed to start process: ${err.message}\n`)
     sendStatus({ status: 'failed', exitCode: -1, finishedAt: Date.now(), stage: null })
     onComplete(jobId, 'failed', -1)
@@ -484,6 +489,7 @@ export function reattachToRunningJob(
 }
 
 export function cancelProcess(jobId: string, stopExePath: string): void {
+  cancellingJobs.add(jobId)
   stopCompletionPolling(jobId)
 
   const child = runningProcesses.get(jobId)
@@ -501,6 +507,7 @@ export function cancelProcess(jobId: string, stopExePath: string): void {
       orphanedPids.delete(jobId)
     }
     stopConsoleLogStreaming(jobId)
+    cancellingJobs.delete(jobId)
     return
   }
 
@@ -509,7 +516,7 @@ export function cancelProcess(jobId: string, stopExePath: string): void {
     const timeout = setTimeout(() => {
       if (runningProcesses.has(jobId)) child.kill()
     }, CANCEL_TIMEOUT_MS)
-    child.on('close', () => {
+    child.once('close', () => {
       clearTimeout(timeout)
       stopConsoleLogStreaming(jobId)
     })
