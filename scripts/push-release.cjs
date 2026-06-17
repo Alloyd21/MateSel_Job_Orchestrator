@@ -6,16 +6,83 @@ const rootDir = path.resolve(__dirname, '..')
 const releaseArg = process.argv[2] ?? 'patch'
 const validReleaseArgs = new Set(['major', 'minor', 'patch', 'premajor', 'preminor', 'prepatch', 'prerelease'])
 const explicitVersionPattern = /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/
+let gitCommand = 'git'
+const npmExecPath = process.env.npm_execpath
 
-function commandName(command) {
-  if (process.platform === 'win32' && command === 'npm') return 'npm.cmd'
-  return command
+function findNpmCli() {
+  const candidates = [
+    npmExecPath,
+    path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    process.platform === 'win32' && process.env.ProgramFiles
+      ? path.join(process.env.ProgramFiles, 'nodejs', 'node_modules', 'npm', 'bin', 'npm-cli.js')
+      : null
+  ].filter(Boolean)
+
+  return candidates.find(pathExists) ?? null
+}
+
+function pathExists(filePath) {
+  try {
+    return fs.existsSync(filePath)
+  } catch {
+    return false
+  }
+}
+
+function findGitHubDesktopGit() {
+  if (process.platform !== 'win32' || !process.env.LOCALAPPDATA) return null
+
+  const desktopDir = path.join(process.env.LOCALAPPDATA, 'GitHubDesktop')
+  if (!pathExists(desktopDir)) return null
+
+  const candidates = fs
+    .readdirSync(desktopDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith('app-'))
+    .map((entry) => path.join(desktopDir, entry.name, 'resources', 'app', 'git', 'cmd', 'git.exe'))
+    .filter(pathExists)
+    .sort()
+
+  return candidates.at(-1) ?? null
+}
+
+function findGitCommand() {
+  const candidates = [
+    'git',
+    process.platform === 'win32' ? path.join(process.env.LOCALAPPDATA ?? '', 'Programs', 'Git', 'cmd', 'git.exe') : null,
+    process.platform === 'win32' ? 'C:\\Program Files\\Git\\cmd\\git.exe' : null,
+    process.platform === 'win32' ? 'C:\\Program Files (x86)\\Git\\cmd\\git.exe' : null,
+    findGitHubDesktopGit()
+  ].filter(Boolean)
+
+  for (const candidate of candidates) {
+    const result = spawnSync(candidate, ['--version'], {
+      cwd: rootDir,
+      encoding: 'utf8'
+    })
+    if (!result.error && result.status === 0) return candidate
+  }
+
+  return null
+}
+
+function resolveCommand(command, args) {
+  if (command === 'npm') {
+    const npmCli = findNpmCli()
+    if (npmCli) return { command: process.execPath, args: [npmCli, ...args] }
+
+    if (process.platform === 'win32') return { command: 'npm.cmd', args, shell: true }
+  }
+
+  if (command === 'git') return { command: gitCommand, args }
+  return { command, args }
 }
 
 function run(command, args, options = {}) {
-  const result = spawnSync(commandName(command), args, {
+  const resolved = resolveCommand(command, args)
+  const result = spawnSync(resolved.command, resolved.args, {
     cwd: rootDir,
     stdio: 'inherit',
+    shell: resolved.shell ?? false,
     ...options
   })
 
@@ -30,9 +97,11 @@ function run(command, args, options = {}) {
 }
 
 function capture(command, args) {
-  const result = spawnSync(commandName(command), args, {
+  const resolved = resolveCommand(command, args)
+  const result = spawnSync(resolved.command, resolved.args, {
     cwd: rootDir,
-    encoding: 'utf8'
+    encoding: 'utf8',
+    shell: resolved.shell ?? false
   })
 
   if (result.error) {
@@ -60,12 +129,14 @@ function validateReleaseArg(arg) {
 }
 
 function ensureGitAvailable() {
-  try {
-    capture('git', ['--version'])
-  } catch {
-    console.error('Git is not available on PATH. Install Git or run this command from a shell where git works.')
+  const resolvedGit = findGitCommand()
+  if (!resolvedGit) {
+    console.error('Git is not available. Install Git or run this command from a shell where git works.')
     process.exit(1)
   }
+
+  gitCommand = resolvedGit
+  console.log(`Using Git: ${resolvedGit}`)
 }
 
 function currentBranch() {
@@ -78,7 +149,8 @@ function currentBranch() {
 }
 
 function ensureTagDoesNotExist(tag) {
-  const local = spawnSync('git', ['rev-parse', '--verify', '--quiet', `refs/tags/${tag}`], {
+  const localGit = resolveCommand('git', ['rev-parse', '--verify', '--quiet', `refs/tags/${tag}`])
+  const local = spawnSync(localGit.command, localGit.args, {
     cwd: rootDir,
     stdio: 'ignore'
   })
@@ -87,7 +159,8 @@ function ensureTagDoesNotExist(tag) {
     process.exit(1)
   }
 
-  const remote = spawnSync('git', ['ls-remote', '--exit-code', '--tags', 'origin', tag], {
+  const remoteGit = resolveCommand('git', ['ls-remote', '--exit-code', '--tags', 'origin', tag])
+  const remote = spawnSync(remoteGit.command, remoteGit.args, {
     cwd: rootDir,
     stdio: 'ignore'
   })
