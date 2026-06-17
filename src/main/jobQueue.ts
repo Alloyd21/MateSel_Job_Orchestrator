@@ -19,6 +19,7 @@ export interface QueuedJob {
   finishedAt?: number
   exitCode?: number
   itersSinceLastChange?: number | null
+  aboveNormalPriority?: boolean
   pid?: number
   log: string[]
   batchChanges: BatchChangeRow[]
@@ -170,7 +171,8 @@ export function cancel(jobId: string): void {
   job.status = 'cancelled'
   job.finishedAt = Date.now()
   job.stage = null
-  sendStatusUpdate(jobId, { status: 'cancelled', finishedAt: job.finishedAt, stage: null, itersSinceLastChange: null })
+  job.aboveNormalPriority = false
+  sendStatusUpdate(jobId, { status: 'cancelled', finishedAt: job.finishedAt, stage: null, itersSinceLastChange: null, aboveNormalPriority: false })
   tick()
 }
 
@@ -187,11 +189,13 @@ export function cancelAll(): void {
     job.status = 'cancelled'
     job.finishedAt = Date.now()
     job.stage = null
+    job.aboveNormalPriority = false
     sendStatusUpdate(job.id, {
       status: job.status,
       finishedAt: job.finishedAt,
       stage: null,
-      itersSinceLastChange: null
+      itersSinceLastChange: null,
+      aboveNormalPriority: false
     })
   }
   tick()
@@ -271,11 +275,13 @@ function onJobComplete(jobId: string, status: 'done' | 'failed', exitCode: numbe
     job.status = status
     job.exitCode = exitCode
     job.finishedAt = Date.now()
+    job.aboveNormalPriority = false
     sendStatusUpdate(jobId, {
       status,
       exitCode,
       finishedAt: job.finishedAt,
-      stage: null
+      stage: null,
+      aboveNormalPriority: false
     })
   }
   tick()
@@ -318,6 +324,9 @@ function tick(): void {
 
     const totalActiveJobs = queue.filter((j) => j.status === 'queued' || j.status === 'running').length
     const raisePriority = maxConcurrent > totalActiveJobs
+
+    next.aboveNormalPriority = raisePriority
+    sendStatusUpdate(next.id, { aboveNormalPriority: raisePriority })
 
     prepareAndStart(
       win,

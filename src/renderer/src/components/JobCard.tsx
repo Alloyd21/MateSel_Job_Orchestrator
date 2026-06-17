@@ -79,9 +79,19 @@ export function JobCard({
           <StatusBadge status={job.status} />
         </div>
       </div>
-      {elapsed && (
-        <div className="mt-0.5 text-xs text-slate-400 font-mono">{elapsed}</div>
-      )}
+      <div className="flex items-center gap-2 mt-0.5">
+        {elapsed && (
+          <span className="text-xs text-slate-400 font-mono">{elapsed}</span>
+        )}
+        {job.aboveNormalPriority && job.status === 'running' && (
+          <span className="flex items-center gap-0.5 text-xs font-medium text-amber-400" title="Running at above normal priority">
+            <svg aria-hidden="true" viewBox="0 0 24 24" className="h-3 w-3" fill="currentColor">
+              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+            </svg>
+            High Priority
+          </span>
+        )}
+      </div>
       {job.stage && (
         <div className="mt-1 truncate text-xs font-medium text-cyan-200">
           {job.stage}

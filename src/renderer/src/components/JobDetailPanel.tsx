@@ -102,6 +102,17 @@ export function JobDetailPanel({
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <StatusBadge status={job.status} />
+          {job.aboveNormalPriority && job.status === 'running' && (
+            <span
+              className="flex items-center gap-1 rounded-full bg-amber-500/20 px-2 py-0.5 text-xs font-medium text-amber-400"
+              title="This job's process is running at above normal OS priority"
+            >
+              <svg aria-hidden="true" viewBox="0 0 24 24" className="h-3 w-3" fill="currentColor">
+                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+              </svg>
+              Above Normal Priority
+            </span>
+          )}
           {canCancel && (
             <button
               onClick={() => onCancel(job.id)}
