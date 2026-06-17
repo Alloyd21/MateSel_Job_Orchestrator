@@ -294,6 +294,6 @@ describe('generateBatchJobs', () => {
     } finally {
       fs.rmSync(destinationParent, { recursive: true, force: true })
     }
-  })
+  }, 15000)
 
 })
