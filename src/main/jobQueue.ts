@@ -18,6 +18,7 @@ export interface QueuedJob {
   startedAt?: number
   finishedAt?: number
   exitCode?: number
+  itersSinceLastChange?: number | null
   pid?: number
   log: string[]
   batchChanges: BatchChangeRow[]
@@ -169,7 +170,7 @@ export function cancel(jobId: string): void {
   job.status = 'cancelled'
   job.finishedAt = Date.now()
   job.stage = null
-  sendStatusUpdate(jobId, { status: 'cancelled', finishedAt: job.finishedAt, stage: null })
+  sendStatusUpdate(jobId, { status: 'cancelled', finishedAt: job.finishedAt, stage: null, itersSinceLastChange: null })
   tick()
 }
 
@@ -189,7 +190,8 @@ export function cancelAll(): void {
     sendStatusUpdate(job.id, {
       status: job.status,
       finishedAt: job.finishedAt,
-      stage: null
+      stage: null,
+      itersSinceLastChange: null
     })
   }
   tick()
@@ -225,6 +227,7 @@ export function restartFailed(jobId: string): void {
     finishedAt: null,
     exitCode: null,
     stage: null,
+    itersSinceLastChange: null,
     log: []
   })
 }

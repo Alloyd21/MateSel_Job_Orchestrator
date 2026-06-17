@@ -19,6 +19,7 @@ export interface Job {
   startedAt?: number | null
   finishedAt?: number | null
   exitCode?: number | null
+  itersSinceLastChange?: number | null
   log: string[]
   batchChanges?: BatchChangeRow[]
 }

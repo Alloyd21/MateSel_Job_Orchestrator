@@ -159,6 +159,12 @@ export function JobDetailPanel({
           <span className="text-slate-500">Elapsed</span>
           <div className="font-mono">{formatElapsed(job.startedAt, job.finishedAt)}</div>
         </div>
+        {job.itersSinceLastChange != null && (
+          <div>
+            <span className="text-slate-500">Iters since last change</span>
+            <div className="font-mono text-slate-200">{job.itersSinceLastChange.toLocaleString()}</div>
+          </div>
+        )}
         {job.exitCode != null && (
           <div>
             <span className="text-slate-500">Exit code</span>

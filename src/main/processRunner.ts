@@ -103,6 +103,38 @@ const fatalOutputPatterns = [
   /\bstopping\./i
 ]
 
+interface IterationState {
+  inOptimization: boolean
+  currentGen: number
+  lastImprovementGen: number
+}
+
+// After "FrontierDone", MateSel prints optimization rows:
+//   Gen NewGen Sires   xG  ...  Fitness  Conv% Seconds   <- improvement row (all cols)
+//   Gen NewGen                  Conv% Seconds            <- checkpoint row (blanks in middle)
+// Improvement rows have a 3rd integer (Sires) followed by a decimal (xG).
+// Checkpoint rows have only Gen + NewGen then spaces.
+// itersSinceLastChange = currentGen - lastImprovementGen.
+function detectItersSinceLastChange(text: string, state: IterationState): number | null {
+  if (!state.inOptimization) {
+    if (!/frontierdone\s*=\s*true/i.test(text)) return null
+    state.inOptimization = true
+  }
+
+  for (const match of text.matchAll(/^\s+(\d+)\s+\d+\s+\d+\s+\d+\.\d/gm)) {
+    const gen = Number(match[1])
+    if (gen > state.lastImprovementGen) state.lastImprovementGen = gen
+  }
+
+  for (const match of text.matchAll(/^\s+(\d+)\s+\d+\s/gm)) {
+    const gen = Number(match[1])
+    if (gen > state.currentGen) state.currentGen = gen
+  }
+
+  if (state.lastImprovementGen === 0) return null
+  return state.currentGen - state.lastImprovementGen
+}
+
 function detectMateSelStage(text: string): string | undefined {
   const lowerText = text.toLowerCase()
   const frontierPointMatches = [...lowerText.matchAll(/frontier point calc #\s*(\d+)/g)]
@@ -340,12 +372,20 @@ function startJob(
   }
 
   let currentStage: string | null = null
+  const iterState: IterationState = { inOptimization: false, currentGen: 0, lastImprovementGen: 0 }
+  let lastReportedIters: number | null = null
   const handleStageText = (text: string): void => {
     const nextStage = detectMateSelStage(text)
-    if (!nextStage || nextStage === currentStage) return
+    if (nextStage && nextStage !== currentStage) {
+      currentStage = nextStage
+      sendStatus({ stage: nextStage })
+    }
 
-    currentStage = nextStage
-    sendStatus({ stage: nextStage })
+    const iters = detectItersSinceLastChange(text, iterState)
+    if (iters !== lastReportedIters) {
+      lastReportedIters = iters
+      sendStatus({ itersSinceLastChange: iters })
+    }
   }
 
   sendStatus({ status: 'running', startedAt: Date.now(), stage: null, pid: child.pid })
@@ -449,11 +489,20 @@ export function reattachToRunningJob(
   orphanedPids.set(jobId, pid)
 
   let currentStage: string | null = null
+  const iterState: IterationState = { inOptimization: false, currentGen: 0, lastImprovementGen: 0 }
+  let lastReportedIters: number | null = null
   const handleStageText = (text: string): void => {
     const nextStage = detectMateSelStage(text)
-    if (!nextStage || nextStage === currentStage) return
-    currentStage = nextStage
-    onStatus({ stage: nextStage })
+    if (nextStage && nextStage !== currentStage) {
+      currentStage = nextStage
+      onStatus({ stage: nextStage })
+    }
+
+    const iters = detectItersSinceLastChange(text, iterState)
+    if (iters !== lastReportedIters) {
+      lastReportedIters = iters
+      onStatus({ itersSinceLastChange: iters })
+    }
   }
 
   onLog(`[Orchestrator] Reconnected to running MateSel process (PID: ${pid}).\n`)
