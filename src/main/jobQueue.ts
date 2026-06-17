@@ -83,6 +83,8 @@ const queue: QueuedJob[] = jobCache.get('jobs', []).map((job) => {
   }
 })
 const runningIds = new Set<string>(pendingReattach)
+const queueActivityListeners = new Set<(hasActive: boolean) => void>()
+let lastActiveState = queue.some((job) => job.status === 'queued' || job.status === 'running')
 
 export function init(mainWindow: BrowserWindow): void {
   win = mainWindow
@@ -113,6 +115,26 @@ export function getAllJobs(): QueuedJob[] {
   return queue
 }
 
+export function hasActiveJobs(): boolean {
+  return queue.some((job) => job.status === 'queued' || job.status === 'running')
+}
+
+export function onQueueActivityChange(listener: (hasActive: boolean) => void): () => void {
+  queueActivityListeners.add(listener)
+  listener(hasActiveJobs())
+  return () => queueActivityListeners.delete(listener)
+}
+
+function notifyQueueActivityIfChanged(): void {
+  const hasActive = hasActiveJobs()
+  if (hasActive === lastActiveState) return
+
+  lastActiveState = hasActive
+  for (const listener of queueActivityListeners) {
+    listener(hasActive)
+  }
+}
+
 function persistJobs(): void {
   jobCache.set('jobs', queue)
 }
@@ -122,6 +144,7 @@ function sendStatusUpdate(jobId: string, patch: Record<string, unknown>): void {
   if (job) Object.assign(job, patch)
 
   persistJobs()
+  notifyQueueActivityIfChanged()
   if (!win) return
   win.webContents.send(IPC.JOB_STATUS_UPDATE, { id: jobId, ...patch })
 }

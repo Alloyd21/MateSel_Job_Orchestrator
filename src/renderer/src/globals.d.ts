@@ -58,6 +58,10 @@ export interface BatchGenerateResult {
   dataFileName?: string
 }
 
+export interface UpdateReadyPayload {
+  version: string | null
+}
+
 declare global {
   interface Window {
     mateselAPI: {
@@ -76,8 +80,10 @@ declare global {
       openFolderDialog: (discoverJobs?: boolean) => Promise<string[]>
       openFileDialog: (filters: { name: string; extensions: string[] }[]) => Promise<string | null>
       openPath: (targetPath: string) => Promise<string>
+      installUpdateAndRestart: () => Promise<{ ready: boolean }>
       onStatusUpdate: (cb: (patch: Record<string, unknown>) => void) => () => void
       onLogChunk: (cb: (payload: { jobId: string; text: string }) => void) => () => void
+      onUpdateReady: (cb: (payload: UpdateReadyPayload) => void) => () => void
     }
   }
 }

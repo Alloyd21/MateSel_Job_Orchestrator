@@ -15,5 +15,7 @@ export const IPC = {
   SETTINGS_SET: 'settings:set',
   DIALOG_OPEN_FOLDER: 'dialog:open-folder',
   DIALOG_OPEN_FILE: 'dialog:open-file',
-  SHELL_OPEN_PATH: 'shell:open-path'
+  SHELL_OPEN_PATH: 'shell:open-path',
+  UPDATE_READY: 'update:ready',
+  UPDATE_INSTALL_AND_RESTART: 'update:install-and-restart'
 } as const

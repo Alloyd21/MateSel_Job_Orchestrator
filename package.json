@@ -1,6 +1,6 @@
 {
   "name": "matesel-job-orchestrator",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Orchestrator for MateSel batch jobs",
   "main": "./out/main/index.js",
   "author": "Adam Lloyd",
@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "electron-store": "^8.2.0",
+    "electron-updater": "^6.8.9",
     "zustand": "^4.5.2"
   },
   "devDependencies": {
@@ -38,6 +39,7 @@
   "build": {
     "appId": "com.matesel.orchestrator",
     "productName": "MateSel Orchestrator",
+    "artifactName": "MateSel-Orchestrator-Setup-${version}.${ext}",
     "directories": {
       "output": "dist"
     },
@@ -50,7 +52,16 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
-    }
+      "allowToChangeInstallationDirectory": false
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Alloyd21",
+        "repo": "MateSel_Job_Orchestrator",
+        "private": false,
+        "releaseType": "release"
+      }
+    ]
   }
 }

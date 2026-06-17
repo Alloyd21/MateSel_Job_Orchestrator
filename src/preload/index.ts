@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('mateselAPI', {
   openFileDialog: (filters: Electron.FileFilter[]) =>
     ipcRenderer.invoke(IPC.DIALOG_OPEN_FILE, filters),
   openPath: (targetPath: string) => ipcRenderer.invoke(IPC.SHELL_OPEN_PATH, targetPath),
+  installUpdateAndRestart: () => ipcRenderer.invoke(IPC.UPDATE_INSTALL_AND_RESTART),
 
   onStatusUpdate: (cb: (patch: Record<string, unknown>) => void) => {
     const handler = (_: Electron.IpcRendererEvent, data: Record<string, unknown>): void => cb(data)
@@ -48,5 +49,14 @@ contextBridge.exposeInMainWorld('mateselAPI', {
     ): void => cb(data)
     ipcRenderer.on(IPC.JOB_LOG_CHUNK, handler)
     return () => ipcRenderer.removeListener(IPC.JOB_LOG_CHUNK, handler)
+  },
+
+  onUpdateReady: (cb: (payload: { version: string | null }) => void) => {
+    const handler = (
+      _: Electron.IpcRendererEvent,
+      data: { version: string | null }
+    ): void => cb(data)
+    ipcRenderer.on(IPC.UPDATE_READY, handler)
+    return () => ipcRenderer.removeListener(IPC.UPDATE_READY, handler)
   }
 })

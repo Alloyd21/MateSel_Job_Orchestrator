@@ -2,6 +2,7 @@ import { app, BrowserWindow, session, shell } from 'electron'
 import path from 'path'
 import { init } from './jobQueue'
 import { registerHandlers } from './ipc/handlers'
+import { initAutoUpdates } from './updater'
 
 const localDevServerHosts = new Set(['localhost', '127.0.0.1', '[::1]'])
 
@@ -104,12 +105,14 @@ app.whenReady().then(() => {
   const win = createWindow()
   init(win)
   registerHandlers(win)
+  initAutoUpdates(win)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       const w = createWindow()
       init(w)
       registerHandlers(w)
+      initAutoUpdates(w)
     }
   })
 })

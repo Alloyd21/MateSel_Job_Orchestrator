@@ -6,7 +6,7 @@ import { AddJobsDialog } from './components/AddJobsDialog'
 import { BatchGeneratorDialog } from './components/BatchGeneratorDialog'
 import { SettingsModal } from './components/SettingsModal'
 import type { Job, JobStatus } from './types/job'
-import type { AddJobRequest, AddJobResult } from './globals'
+import type { AddJobRequest, AddJobResult, UpdateReadyPayload } from './globals'
 
 const terminalStatuses: JobStatus[] = ['done', 'failed', 'cancelled']
 
@@ -15,6 +15,9 @@ export default function App(): JSX.Element {
   const [showAddJobs, setShowAddJobs] = useState(false)
   const [showBatchGenerator, setShowBatchGenerator] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [updateReady, setUpdateReady] = useState<UpdateReadyPayload | null>(null)
+  const [updateDismissed, setUpdateDismissed] = useState(false)
+  const [restartingForUpdate, setRestartingForUpdate] = useState(false)
 
   useEffect(() => {
     window.mateselAPI.getAllJobs().then((existing: Job[]) => {
@@ -33,6 +36,14 @@ export default function App(): JSX.Element {
       unsubStatus()
       unsubLog()
     }
+  }, [])
+
+  useEffect(() => {
+    const unsubscribe = window.mateselAPI.onUpdateReady((payload) => {
+      setUpdateReady(payload)
+      setUpdateDismissed(false)
+    })
+    return unsubscribe
   }, [])
 
   const handleAddJobs = async (jobsToAdd: Array<string | AddJobRequest>): Promise<AddJobResult[]> => {
@@ -70,7 +81,14 @@ export default function App(): JSX.Element {
     }))
   }
 
+  const handleInstallUpdate = async (): Promise<void> => {
+    setRestartingForUpdate(true)
+    const result = await window.mateselAPI.installUpdateAndRestart()
+    if (!result.ready) setRestartingForUpdate(false)
+  }
+
   const selectedJob = jobs.find((j) => j.id === selectedJobId) ?? null
+  const showUpdatePrompt = updateReady !== null && !updateDismissed
 
   return (
     <div className="flex flex-col h-screen bg-gray-900 text-slate-200 overflow-hidden">
@@ -100,6 +118,33 @@ export default function App(): JSX.Element {
           </button>
         </div>
       </header>
+
+      {showUpdatePrompt && (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-emerald-800 bg-emerald-950 px-4 py-2 text-sm text-emerald-50">
+          <span>
+            {updateReady.version
+              ? `Update ${updateReady.version} is ready to install.`
+              : 'An update is ready to install.'}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setUpdateDismissed(true)}
+              className="rounded bg-emerald-900 px-3 py-1.5 text-xs font-semibold text-emerald-100 hover:bg-emerald-800"
+            >
+              Dismiss
+            </button>
+            <button
+              type="button"
+              onClick={handleInstallUpdate}
+              disabled={restartingForUpdate}
+              className="rounded bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500 disabled:cursor-wait disabled:bg-emerald-800"
+            >
+              {restartingForUpdate ? 'Restarting...' : 'Restart to update'}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-1 min-h-0">
         <aside className="w-64 shrink-0 border-r border-slate-700 bg-slate-800 flex flex-col min-h-0">
