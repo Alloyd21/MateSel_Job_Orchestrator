@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '../main/ipc/channels'
 
 contextBridge.exposeInMainWorld('mateselAPI', {
+  getAppVersion: () => ipcRenderer.invoke(IPC.APP_GET_VERSION),
   getAllJobs: () => ipcRenderer.invoke(IPC.JOBS_GET_ALL),
   inspectBatchStarter: (starterFolder: string) =>
     ipcRenderer.invoke(IPC.BATCH_INSPECT_STARTER, starterFolder),

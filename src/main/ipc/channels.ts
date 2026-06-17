@@ -11,6 +11,7 @@ export const IPC = {
   JOBS_GET_ALL: 'jobs:get-all',
   BATCH_INSPECT_STARTER: 'batch:inspect-starter',
   BATCH_GENERATE: 'batch:generate',
+  APP_GET_VERSION: 'app:get-version',
   SETTINGS_GET: 'settings:get',
   SETTINGS_SET: 'settings:set',
   DIALOG_OPEN_FOLDER: 'dialog:open-folder',

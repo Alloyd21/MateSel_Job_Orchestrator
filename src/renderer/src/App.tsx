@@ -9,17 +9,20 @@ import type { Job, JobStatus } from './types/job'
 import type { AddJobRequest, AddJobResult, UpdateReadyPayload } from './globals'
 
 const terminalStatuses: JobStatus[] = ['done', 'failed', 'cancelled']
+const githubUrl = 'https://github.com/Alloyd21/MateSel_Job_Orchestrator'
 
 export default function App(): JSX.Element {
   const { jobs, selectedJobId, selectJob, applyStatusUpdate, appendLog } = useJobStore()
   const [showAddJobs, setShowAddJobs] = useState(false)
   const [showBatchGenerator, setShowBatchGenerator] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [appVersion, setAppVersion] = useState<string | null>(null)
   const [updateReady, setUpdateReady] = useState<UpdateReadyPayload | null>(null)
   const [updateDismissed, setUpdateDismissed] = useState(false)
   const [restartingForUpdate, setRestartingForUpdate] = useState(false)
 
   useEffect(() => {
+    window.mateselAPI.getAppVersion().then(setAppVersion)
     window.mateselAPI.getAllJobs().then((existing: Job[]) => {
       for (const job of existing) applyStatusUpdate(job)
     })
@@ -93,9 +96,22 @@ export default function App(): JSX.Element {
   return (
     <div className="flex flex-col h-screen bg-gray-900 text-slate-200 overflow-hidden">
       <header className="flex items-center justify-between px-4 py-2.5 bg-slate-800 border-b border-slate-700 shrink-0">
-        <h1 className="text-sm font-semibold tracking-wide text-slate-100">
-          MateSel Orchestrator
-        </h1>
+        <div className="flex items-baseline gap-2">
+          <h1 className="text-sm font-semibold tracking-wide text-slate-100">
+            MateSel Orchestrator
+          </h1>
+          {appVersion && (
+            <a
+              href={githubUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-[11px] font-medium text-slate-500 hover:text-slate-300"
+              title="Open MateSel Orchestrator on GitHub"
+            >
+              v{appVersion}
+            </a>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowSettings(true)}

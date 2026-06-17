@@ -11,7 +11,8 @@
     "test": "vitest run",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "package": "electron-vite build && electron-builder"
+    "package": "electron-vite build && electron-builder",
+    "push-release": "node scripts/push-release.cjs"
   },
   "dependencies": {
     "electron-store": "^8.2.0",

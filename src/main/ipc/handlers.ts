@@ -1,4 +1,4 @@
-import { ipcMain, dialog, BrowserWindow, shell } from 'electron'
+import { app, ipcMain, dialog, BrowserWindow, shell } from 'electron'
 import { IPC } from './channels'
 import { store } from '../store'
 import { enqueue, cancel, cancelAll, clearCompleted, getAllJobs, restartFailed, start, startAll } from '../jobQueue'
@@ -31,6 +31,8 @@ function normalizeAddJobRequest(request: string | AddJobRequest): AddJobRequest 
 }
 
 export function registerHandlers(win: BrowserWindow): void {
+  ipcMain.handle(IPC.APP_GET_VERSION, () => app.getVersion())
+
   ipcMain.handle(IPC.JOBS_GET_ALL, () => getAllJobs())
 
   ipcMain.handle(IPC.BATCH_INSPECT_STARTER, (_event, starterFolder: string) => {

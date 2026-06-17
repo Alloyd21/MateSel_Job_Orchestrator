@@ -65,6 +65,7 @@ export interface UpdateReadyPayload {
 declare global {
   interface Window {
     mateselAPI: {
+      getAppVersion: () => Promise<string>
       getAllJobs: () => Promise<Job[]>
       inspectBatchStarter: (starterFolder: string) => Promise<BatchInspectResult>
       generateBatchJobs: (payload: BatchGeneratePayload) => Promise<BatchGenerateResult>
