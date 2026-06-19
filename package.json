@@ -1,6 +1,6 @@
 {
   "name": "matesel-job-orchestrator",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "description": "Orchestrator for MateSel batch jobs",
   "main": "./out/main/index.js",
   "author": "Adam Lloyd",
@@ -11,7 +11,8 @@
     "test": "vitest run",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "package": "electron-vite build && electron-builder",
+    "package": "node scripts/package-variant.cjs autoupdate",
+    "package:standalone": "node scripts/package-variant.cjs standalone",
     "push-release": "node scripts/push-release.cjs"
   },
   "dependencies": {
@@ -40,7 +41,7 @@
   "build": {
     "appId": "com.matesel.orchestrator",
     "productName": "MateSel Orchestrator",
-    "artifactName": "MateSel-Orchestrator-Setup-${version}.${ext}",
+    "artifactName": "MateSel-Orchestrator-AutoUpdate-Setup-${version}.${ext}",
     "directories": {
       "output": "dist"
     },
@@ -48,7 +49,9 @@
       "out/**/*"
     ],
     "win": {
-      "target": "nsis",
+      "target": [
+        "nsis"
+      ],
       "signAndEditExecutable": false
     },
     "nsis": {

@@ -186,8 +186,10 @@ const tag = `v${version}`
 ensureTagDoesNotExist(tag)
 
 run('npm', ['test'])
-run('npm', ['run', 'build'])
+// Pre-flight: package both release variants locally so any packaging break is caught
+// before the tag is pushed (CI re-runs these and publishes once the tag lands).
 run('npm', ['run', 'package'])
+run('npm', ['run', 'package:standalone'])
 
 if (hasChanges()) {
   run('git', ['add', '-A'])

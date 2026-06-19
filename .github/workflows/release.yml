@@ -37,10 +37,17 @@ jobs:
       - name: Test
         run: npm test
 
-      - name: Build
-        run: npm run build
+      - name: Publish auto-update variant
+        run: node scripts/package-variant.cjs autoupdate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI: 'true'
 
-      - name: Publish release
-        run: npx electron-builder --publish always
+      - name: Build standalone variant
+        run: node scripts/package-variant.cjs standalone
+
+      - name: Attach standalone artifacts to release
+        shell: pwsh
+        run: gh release upload "$env:GITHUB_REF_NAME" (Get-ChildItem dist-standalone/*.exe).FullName
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
