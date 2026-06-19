@@ -321,7 +321,7 @@ export function BatchGeneratorDialog({ onClose }: BatchGeneratorDialogProps): JS
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col gap-4 p-5">
-          <div className="grid gap-3 lg:grid-cols-2">
+          <div className={`grid gap-3 ${inspection ? 'lg:grid-cols-2' : ''}`}>
             <div className="flex min-w-0 items-center gap-3 rounded-lg border border-slate-700 bg-slate-900 p-3">
               <button
                 onClick={browseStarter}
@@ -349,20 +349,21 @@ export function BatchGeneratorDialog({ onClose }: BatchGeneratorDialogProps): JS
               </div>
             </div>
 
-            <div className="flex min-w-0 items-center gap-3 rounded-lg border border-slate-700 bg-slate-900 p-3">
-              <label className="flex min-w-0 flex-1 items-center gap-2">
-                <span className="shrink-0 text-xs font-semibold text-slate-300">Job name</span>
-                <input
-                  value={batchJobName}
-                  onChange={(event) => setBatchJobName(event.target.value)}
-                  disabled={!inspection}
-                  className="min-w-0 flex-1 rounded border border-slate-600 bg-slate-950 px-2 py-1.5 text-xs text-slate-100 disabled:opacity-40"
-                />
-              </label>
-              <div className="min-w-0 flex-1 truncate text-right font-mono text-[11px] text-slate-500">
-                {inspection ? batchFolderPreview : ''}
+            {inspection && (
+              <div className="flex min-w-0 items-center gap-3 rounded-lg border border-slate-700 bg-slate-900 p-3">
+                <label className="flex min-w-0 flex-1 items-center gap-2">
+                  <span className="shrink-0 text-xs font-semibold text-slate-300">Job name</span>
+                  <input
+                    value={batchJobName}
+                    onChange={(event) => setBatchJobName(event.target.value)}
+                    className="min-w-0 flex-1 rounded border border-slate-600 bg-slate-950 px-2 py-1.5 text-xs text-slate-100"
+                  />
+                </label>
+                <div className="min-w-0 flex-1 truncate text-right font-mono text-[11px] text-slate-500">
+                  {batchFolderPreview}
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
           {inspection?.needsDataFile && (
