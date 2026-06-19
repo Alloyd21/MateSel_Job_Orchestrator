@@ -21,6 +21,8 @@ interface AddJobResult {
 interface BatchGeneratePayload {
   starterFolder: string
   destinationParent: string
+  batchName?: string
+  batchTimestamp?: string
   selectedDataFileName?: string
   variations: BatchVariationSpec[]
   allowLargeBatch?: boolean

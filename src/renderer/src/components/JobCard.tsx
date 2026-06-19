@@ -59,7 +59,20 @@ export function JobCard({
     >
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <span className="block text-sm font-medium text-slate-100 truncate">{job.name}</span>
+          <div className="flex min-w-0 items-center gap-1">
+            <span className="min-w-0 truncate text-sm font-medium text-slate-100">{job.name}</span>
+            {job.aboveNormalPriority && job.status === 'running' && (
+              <span
+                className="shrink-0 text-xs font-medium text-amber-400"
+                title="Running at above normal priority"
+                aria-label="High priority"
+              >
+                <svg aria-hidden="true" viewBox="0 0 24 24" className="h-3 w-3" fill="currentColor">
+                  <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+                </svg>
+              </span>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           {job.status === 'ready' && (
@@ -83,20 +96,12 @@ export function JobCard({
         {elapsed && (
           <span className="text-xs text-slate-400 font-mono">{elapsed}</span>
         )}
-        {job.aboveNormalPriority && job.status === 'running' && (
-          <span className="flex items-center gap-0.5 text-xs font-medium text-amber-400" title="Running at above normal priority">
-            <svg aria-hidden="true" viewBox="0 0 24 24" className="h-3 w-3" fill="currentColor">
-              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
-            </svg>
-            High Priority
+        {job.stage && (
+          <span className="min-w-0 truncate text-xs font-medium text-cyan-200">
+            {job.stage}
           </span>
         )}
       </div>
-      {job.stage && (
-        <div className="mt-1 truncate text-xs font-medium text-cyan-200">
-          {job.stage}
-        </div>
-      )}
     </div>
   )
 }

@@ -9,6 +9,7 @@ interface JobQueuePanelProps {
   onStartAll: () => void
   onStopAll: () => void
   onClearCompleted: () => void
+  onAddJobs: () => void
 }
 
 const terminalStatuses: JobStatus[] = ['done', 'failed', 'cancelled']
@@ -20,7 +21,8 @@ export function JobQueuePanel({
   onStart,
   onStartAll,
   onStopAll,
-  onClearCompleted
+  onClearCompleted,
+  onAddJobs
 }: JobQueuePanelProps): JSX.Element {
   const hasCompleted = jobs.some((j) => terminalStatuses.includes(j.status))
   const readyCount = jobs.filter((j) => j.status === 'ready').length
@@ -42,7 +44,15 @@ export function JobQueuePanel({
       <div className="flex-1 overflow-y-auto px-2 py-2 flex flex-col gap-1">
         {jobs.length === 0 ? (
           <p className="text-xs text-slate-500 text-center mt-8 px-4">
-            No jobs yet. Click <strong className="text-slate-300">+ Add Jobs</strong> to get started.
+            No jobs yet. Click{' '}
+            <button
+              type="button"
+              onClick={onAddJobs}
+              className="font-semibold text-slate-300 hover:text-white"
+            >
+              + Add Jobs
+            </button>{' '}
+            to get started.
           </p>
         ) : (
           jobs.map((job) => (

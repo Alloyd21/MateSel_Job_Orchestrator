@@ -203,6 +203,50 @@ describe('generateBatchJobs', () => {
     }
   })
 
+  it('uses the requested batch name and timestamp for the main batch folder', () => {
+    writeFile('Matesel.ini', 'config')
+    writeFile('InpOneGroup.txt', inpOneGroup)
+    writeFile('DataFile.csv', 'ID,Sex\nA,F\n')
+    const destinationParent = fs.mkdtempSync(path.join(os.tmpdir(), 'matesel-batch-dest-'))
+    const trait = inspectBatchStarter(tempDir).traits[0]
+
+    try {
+      const result = generateBatchJobs({
+        starterFolder: tempDir,
+        destinationParent,
+        batchName: 'SR_1_F1_2',
+        batchTimestamp: '2026-06-19_10-20-30',
+        variations: [{ rowId: trait.id, endUseIndex: 0, mode: 'value', value: '2' }]
+      })
+
+      expect(path.basename(result.batchFolder)).toBe('Batch_SR_1_F1_2_2026-06-19_10-20-30')
+    } finally {
+      fs.rmSync(destinationParent, { recursive: true, force: true })
+    }
+  })
+
+  it('omits the job name segment when the requested batch name is empty', () => {
+    writeFile('Matesel.ini', 'config')
+    writeFile('InpOneGroup.txt', inpOneGroup)
+    writeFile('DataFile.csv', 'ID,Sex\nA,F\n')
+    const destinationParent = fs.mkdtempSync(path.join(os.tmpdir(), 'matesel-batch-dest-'))
+    const trait = inspectBatchStarter(tempDir).traits[0]
+
+    try {
+      const result = generateBatchJobs({
+        starterFolder: tempDir,
+        destinationParent,
+        batchName: '',
+        batchTimestamp: '2026-06-19_10-20-30',
+        variations: [{ rowId: trait.id, endUseIndex: 0, mode: 'value', value: '2' }]
+      })
+
+      expect(path.basename(result.batchFolder)).toBe('Batch_2026-06-19_10-20-30')
+    } finally {
+      fs.rmSync(destinationParent, { recursive: true, force: true })
+    }
+  })
+
   it('requires confirmation above the large batch guard', () => {
     writeFile('Matesel.ini', 'config')
     writeFile('InpOneGroup.txt', inpOneGroup)

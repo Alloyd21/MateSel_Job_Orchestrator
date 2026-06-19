@@ -172,12 +172,18 @@ export default function App(): JSX.Element {
             onStartAll={handleStartAll}
             onStopAll={handleCancelAll}
             onClearCompleted={handleClearCompleted}
+            onAddJobs={() => setShowAddJobs(true)}
           />
         </aside>
 
         <main className="flex-1 min-w-0 bg-gray-900">
           {selectedJob ? (
-            <JobDetailPanel job={selectedJob} onCancel={handleCancel} onRestart={handleRestart} />
+            <JobDetailPanel
+              job={selectedJob}
+              onCancel={handleCancel}
+              onStart={handleStart}
+              onRestart={handleRestart}
+            />
           ) : (
             <div className="flex items-center justify-center h-full text-slate-500 text-sm">
               Select a job to view details

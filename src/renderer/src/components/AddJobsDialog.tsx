@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type DragEvent } from 'react'
 import type { AddJobRequest, AddJobResult } from '../globals'
 
 interface AddJobsDialogProps {
@@ -11,16 +11,35 @@ export function AddJobsDialog({ onClose, onAdd }: AddJobsDialogProps): JSX.Eleme
   const [queuedFolders, setQueuedFolders] = useState<Set<string>>(new Set())
   const [pendingDataFiles, setPendingDataFiles] = useState<AddJobResult[]>([])
   const [selectedDataFiles, setSelectedDataFiles] = useState<Record<string, string>>({})
+  const [draggingFolders, setDraggingFolders] = useState(false)
   const [loading, setLoading] = useState(false)
   const hasAllSelectedDataFiles =
     pendingDataFiles.length === 0 ||
     pendingDataFiles.every((result) => Boolean(selectedDataFiles[result.folder]))
 
+  const addFolders = (selected: string[]): void => {
+    if (selected.length === 0) return
+    setFolders((prev) => [...prev, ...selected.filter((f) => !prev.includes(f))])
+  }
+
   const browse = async (): Promise<void> => {
-    const selected: string[] = await window.mateselAPI.openFolderDialog()
-    if (selected.length > 0) {
-      setFolders((prev) => [...prev, ...selected.filter((f) => !prev.includes(f))])
-    }
+    addFolders(await window.mateselAPI.openFolderDialog())
+  }
+
+  const handleDragOver = (event: DragEvent<HTMLButtonElement>): void => {
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+    setDraggingFolders(true)
+  }
+
+  const handleDrop = (event: DragEvent<HTMLButtonElement>): void => {
+    event.preventDefault()
+    setDraggingFolders(false)
+    addFolders(
+      Array.from(event.dataTransfer.files)
+        .map((file) => window.mateselAPI.getDroppedFilePath(file))
+        .filter(Boolean)
+    )
   }
 
   const remove = (folder: string): void => {
@@ -92,9 +111,16 @@ export function AddJobsDialog({ onClose, onAdd }: AddJobsDialogProps): JSX.Eleme
         <div className="p-5 flex flex-col gap-3 min-h-0">
           <button
             onClick={browse}
-            className="w-full py-2 border border-dashed border-slate-500 rounded-lg text-sm text-slate-300 hover:border-blue-400 hover:text-blue-300 transition-colors"
+            onDragOver={handleDragOver}
+            onDragLeave={() => setDraggingFolders(false)}
+            onDrop={handleDrop}
+            className={`w-full py-2 border border-dashed rounded-lg text-sm transition-colors ${
+              draggingFolders
+                ? 'border-blue-400 bg-blue-950/40 text-blue-200'
+                : 'border-slate-500 text-slate-300 hover:border-blue-400 hover:text-blue-300'
+            }`}
           >
-            + Browse for job folder(s) or parent folder
+            {draggingFolders ? 'Drop folder(s) to add' : '+ Browse for job folder(s) or parent folder'}
           </button>
 
           {folders.length > 0 && (

@@ -47,6 +47,8 @@ export interface BatchVariationSpec {
 export interface BatchGeneratePayload {
   starterFolder: string
   destinationParent: string
+  batchName?: string
+  batchTimestamp?: string
   selectedDataFileName?: string
   variations: BatchVariationSpec[]
   allowLargeBatch?: boolean
@@ -80,6 +82,7 @@ declare global {
       setSettings: (patch: Record<string, unknown>) => Promise<void>
       openFolderDialog: (discoverJobs?: boolean) => Promise<string[]>
       openFileDialog: (filters: { name: string; extensions: string[] }[]) => Promise<string | null>
+      getDroppedFilePath: (file: File) => string
       openPath: (targetPath: string) => Promise<string>
       installUpdateAndRestart: () => Promise<{ ready: boolean }>
       onStatusUpdate: (cb: (patch: Record<string, unknown>) => void) => () => void

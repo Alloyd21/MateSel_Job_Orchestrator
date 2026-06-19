@@ -237,10 +237,10 @@ export function clearCompleted(): void {
 export function restartFailed(jobId: string): void {
   if (!win) return
   const job = queue.find((j) => j.id === jobId)
-  if (!job || job.status !== 'failed') return
+  if (!job || !['done', 'failed', 'cancelled'].includes(job.status)) return
 
   job.outputDir = ''
-  job.status = 'ready'
+  job.status = 'queued'
   delete job.startedAt
   delete job.finishedAt
   delete job.exitCode
@@ -257,6 +257,7 @@ export function restartFailed(jobId: string): void {
     itersSinceLastChange: null,
     log: []
   })
+  tick()
 }
 
 export function start(jobId: string): void {

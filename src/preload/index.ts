@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '../main/ipc/channels'
 
 contextBridge.exposeInMainWorld('mateselAPI', {
@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('mateselAPI', {
   generateBatchJobs: (payload: {
     starterFolder: string
     destinationParent: string
+    batchName?: string
+    batchTimestamp?: string
     selectedDataFileName?: string
     variations: Array<{
       rowId: string
@@ -34,6 +36,7 @@ contextBridge.exposeInMainWorld('mateselAPI', {
   openFolderDialog: (discoverJobs = true) => ipcRenderer.invoke(IPC.DIALOG_OPEN_FOLDER, discoverJobs),
   openFileDialog: (filters: Electron.FileFilter[]) =>
     ipcRenderer.invoke(IPC.DIALOG_OPEN_FILE, filters),
+  getDroppedFilePath: (file: File) => webUtils.getPathForFile(file),
   openPath: (targetPath: string) => ipcRenderer.invoke(IPC.SHELL_OPEN_PATH, targetPath),
   installUpdateAndRestart: () => ipcRenderer.invoke(IPC.UPDATE_INSTALL_AND_RESTART),
 

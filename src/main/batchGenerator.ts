@@ -37,6 +37,8 @@ export interface BatchVariationSpec {
 export interface BatchGenerateRequest {
   starterFolder: string
   destinationParent: string
+  batchName?: string
+  batchTimestamp?: string
   selectedDataFileName?: string
   variations: BatchVariationSpec[]
   allowLargeBatch?: boolean
@@ -360,8 +362,26 @@ function makeTimestamp(): string {
   return new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, 19)
 }
 
-function createUniqueBatchFolder(destinationParent: string, starterFolder: string): string {
-  const baseName = `Batch_${path.basename(starterFolder)}_${makeTimestamp()}`
+function sanitizeFolderSegment(value: string): string {
+  return value.trim().replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').replace(/[. ]+$/, '')
+}
+
+function normalizeBatchTimestamp(value?: string): string {
+  if (value && /^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$/.test(value)) return value
+  return makeTimestamp()
+}
+
+function createUniqueBatchFolder(
+  destinationParent: string,
+  starterFolder: string,
+  batchName?: string,
+  batchTimestamp?: string
+): string {
+  const requestedName = batchName == null ? undefined : sanitizeFolderSegment(batchName)
+  const fallbackName = batchName == null ? sanitizeFolderSegment(path.basename(starterFolder)) : ''
+  const jobName = requestedName ?? fallbackName
+  const timestamp = normalizeBatchTimestamp(batchTimestamp)
+  const baseName = jobName ? `Batch_${jobName}_${timestamp}` : `Batch_${timestamp}`
   let candidate = path.join(destinationParent, baseName)
   let suffix = 2
   while (fs.existsSync(candidate)) {
@@ -476,7 +496,12 @@ export function generateBatchJobs(request: BatchGenerateRequest): BatchGenerateR
     throw new Error(`Batch would create ${combinationCount} runs. Confirm large batch generation to continue.`)
   }
 
-  const batchFolder = createUniqueBatchFolder(request.destinationParent, request.starterFolder)
+  const batchFolder = createUniqueBatchFolder(
+    request.destinationParent,
+    request.starterFolder,
+    request.batchName,
+    request.batchTimestamp
+  )
   const generatedFolders: string[] = []
   const generatedAt = new Date().toISOString()
 

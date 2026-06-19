@@ -76,14 +76,17 @@ function BatchChangesTable({ rows }: { rows: NonNullable<Job['batchChanges']> })
 export function JobDetailPanel({
   job,
   onCancel,
+  onStart,
   onRestart
 }: {
   job: Job
   onCancel: (id: string) => void
+  onStart: (id: string) => void
   onRestart: (id: string) => void
 }): JSX.Element {
-  const canCancel = job.status === 'ready' || job.status === 'queued' || job.status === 'running'
-  const canRestart = job.status === 'failed'
+  const canCancel = job.status === 'queued' || job.status === 'running'
+  const canStart = job.status === 'ready'
+  const canRestart = job.status === 'done' || job.status === 'failed' || job.status === 'cancelled'
   const canOpenOutputDir = Boolean(job.outputDir)
   const runId = job.outputDir ? getRunId(job.outputDir) : '-'
   const batchChanges = job.batchChanges ?? []
@@ -96,12 +99,14 @@ export function JobDetailPanel({
   return (
     <div className="flex flex-col h-full gap-4 p-4">
       <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-100 break-all">{job.name}</h2>
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-2">
+            <h2 className="text-lg font-semibold text-slate-100 break-all">{job.name}</h2>
+            <StatusBadge status={job.status} />
+          </div>
           <p className="text-xs text-slate-400 mt-0.5 break-all">{job.jobFolder}</p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <StatusBadge status={job.status} />
           {job.aboveNormalPriority && job.status === 'running' && (
             <span
               className="flex items-center gap-1 rounded-full bg-amber-500/20 px-2 py-0.5 text-xs font-medium text-amber-400"
@@ -112,6 +117,14 @@ export function JobDetailPanel({
               </svg>
               Above Normal Priority
             </span>
+          )}
+          {canStart && (
+            <button
+              onClick={() => onStart(job.id)}
+              className="text-xs px-2.5 py-1 rounded bg-emerald-700 hover:bg-emerald-600 text-emerald-50 font-medium"
+            >
+              Start
+            </button>
           )}
           {canCancel && (
             <button

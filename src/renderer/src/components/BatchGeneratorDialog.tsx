@@ -88,8 +88,23 @@ function hasBatchApi(): boolean {
   )
 }
 
+function makeBatchTimestamp(): string {
+  return new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, 19)
+}
+
+function folderBaseName(folder: string): string {
+  const parts = folder.split(/[\\/]/).filter(Boolean)
+  return parts.length > 0 ? parts[parts.length - 1] : ''
+}
+
+function sanitizeFolderSegment(value: string): string {
+  return value.trim().replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').replace(/[. ]+$/, '')
+}
+
 export function BatchGeneratorDialog({ onClose }: BatchGeneratorDialogProps): JSX.Element {
   const [starterFolder, setStarterFolder] = useState('')
+  const [batchJobName, setBatchJobName] = useState('')
+  const [batchTimestamp, setBatchTimestamp] = useState(makeBatchTimestamp())
   const [inspection, setInspection] = useState<BatchInspectResult | null>(null)
   const [selectedDataFileName, setSelectedDataFileName] = useState('')
   const [activeRowId, setActiveRowId] = useState<string | null>(null)
@@ -138,6 +153,10 @@ export function BatchGeneratorDialog({ onClose }: BatchGeneratorDialogProps): JS
     inspection != null &&
     (inspection.valid || isOnlyDataFileWarning(inspection)) &&
     (!inspection.needsDataFile || Boolean(selectedDataFileName))
+  const sanitizedBatchJobName = sanitizeFolderSegment(batchJobName)
+  const batchFolderPreview = sanitizedBatchJobName
+    ? `Batch_${sanitizedBatchJobName}_${batchTimestamp}`
+    : `Batch_${batchTimestamp}`
   const canGenerate =
     hasUsableStarter &&
     enabledSpecs.length > 0 &&
@@ -157,6 +176,8 @@ export function BatchGeneratorDialog({ onClose }: BatchGeneratorDialogProps): JS
 
     const folder = folders[0]
     setStarterFolder(folder)
+    setBatchJobName(folderBaseName(folder))
+    setBatchTimestamp(makeBatchTimestamp())
     setInspection(null)
     setSelectedDataFileName('')
     setDrafts({})
@@ -228,6 +249,8 @@ export function BatchGeneratorDialog({ onClose }: BatchGeneratorDialogProps): JS
       const generated = await window.mateselAPI.generateBatchJobs({
         starterFolder,
         destinationParent: destinationFolders[0],
+        batchName: sanitizedBatchJobName,
+        batchTimestamp,
         selectedDataFileName: selectedDataFileName || inspection.dataFileName,
         variations: enabledSpecs,
         allowLargeBatch
@@ -298,29 +321,48 @@ export function BatchGeneratorDialog({ onClose }: BatchGeneratorDialogProps): JS
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col gap-4 p-5">
-          <div className="flex items-center gap-3 rounded-lg border border-slate-700 bg-slate-900 p-3">
-            <button
-              onClick={browseStarter}
-              disabled={loading}
-              className="shrink-0 rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-50"
-            >
-              Select starter
-            </button>
-            <div className="min-w-0 flex-1 truncate font-mono text-xs text-slate-300">
-              {starterFolder || 'No starter job selected'}
-            </div>
-            {inspection && (
-              <div className="shrink-0 text-right text-xs text-slate-400">
-                <div>
-                  {inspection.endUseCount} EndUses, {inspection.traits.length} traits, {inspection.markerLocusCount} marker loci
+          <div className="grid gap-3 lg:grid-cols-2">
+            <div className="flex min-w-0 items-center gap-3 rounded-lg border border-slate-700 bg-slate-900 p-3">
+              <button
+                onClick={browseStarter}
+                disabled={loading}
+                className="shrink-0 rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-50"
+              >
+                Select starter
+              </button>
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-mono text-xs text-slate-300">
+                  {starterFolder || 'No starter job selected'}
                 </div>
-                {inspection.weightingFileName && (
-                  <div className="font-mono text-[10px] text-slate-500">
-                    weights: {inspection.weightingFileName}
+                {inspection && (
+                  <div className="mt-0.5 text-xs text-slate-400">
+                    <span>
+                      {inspection.endUseCount} EndUses, {inspection.traits.length} traits, {inspection.markerLocusCount} marker loci
+                    </span>
+                    {inspection.weightingFileName && (
+                      <span className="ml-2 font-mono text-[10px] text-slate-500">
+                        weights: {inspection.weightingFileName}
+                      </span>
+                    )}
                   </div>
                 )}
               </div>
-            )}
+            </div>
+
+            <div className="flex min-w-0 items-center gap-3 rounded-lg border border-slate-700 bg-slate-900 p-3">
+              <label className="flex min-w-0 flex-1 items-center gap-2">
+                <span className="shrink-0 text-xs font-semibold text-slate-300">Job name</span>
+                <input
+                  value={batchJobName}
+                  onChange={(event) => setBatchJobName(event.target.value)}
+                  disabled={!inspection}
+                  className="min-w-0 flex-1 rounded border border-slate-600 bg-slate-950 px-2 py-1.5 text-xs text-slate-100 disabled:opacity-40"
+                />
+              </label>
+              <div className="min-w-0 flex-1 truncate text-right font-mono text-[11px] text-slate-500">
+                {inspection ? batchFolderPreview : ''}
+              </div>
+            </div>
           </div>
 
           {inspection?.needsDataFile && (
@@ -350,86 +392,86 @@ export function BatchGeneratorDialog({ onClose }: BatchGeneratorDialogProps): JS
 
           {inspection && (
             <div className="grid min-h-0 flex-1 grid-cols-[minmax(280px,380px)_1fr] gap-4">
-              <div className="flex min-h-0 flex-col gap-4 overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 p-3">
-                {renderRowList('Traits', inspection.traits)}
-                {renderRowList('Markers', inspection.markers)}
-              </div>
+                <div className="flex min-h-0 flex-col gap-4 overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 p-3">
+                  {renderRowList('Traits', inspection.traits)}
+                  {renderRowList('Markers', inspection.markers)}
+                </div>
 
-              <div className="min-h-0 overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 p-4">
-                {activeRow ? (
-                  <div className="flex flex-col gap-4">
-                    <div>
-                      <div className="text-sm font-semibold text-slate-100">{activeRow.name}</div>
-                      <div className="text-xs text-slate-500">
-                        {activeRow.kind === 'trait' ? 'Trait weighting' : 'Marker weighting'}
+                <div className="min-h-0 overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 p-4">
+                  {activeRow ? (
+                    <div className="flex flex-col gap-4">
+                      <div>
+                        <div className="text-sm font-semibold text-slate-100">{activeRow.name}</div>
+                        <div className="text-xs text-slate-500">
+                          {activeRow.kind === 'trait' ? 'Trait weighting' : 'Marker weighting'}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                        {Array.from({ length: inspection.endUseCount }, (_, index) => {
+                          const key = keyFor(activeRow.id, index)
+                          const draft = drafts[key] ?? defaultDraft(activeRow.values[index] ?? '')
+                          return (
+                            <div key={key} className="rounded border border-slate-700 bg-slate-950 p-3">
+                              <label className="flex items-center justify-between gap-2">
+                                <span className="text-xs font-semibold text-slate-200">EndUse {index + 1}</span>
+                                <span className="font-mono text-[11px] text-slate-500">
+                                  default {activeRow.values[index]}
+                                </span>
+                                <input
+                                  type="checkbox"
+                                  checked={draft.enabled}
+                                  onChange={(event) => updateDraft(activeRow, index, { enabled: event.target.checked })}
+                                  className="h-3.5 w-3.5"
+                                />
+                              </label>
+
+                              <div className="mt-3 grid grid-cols-[120px_1fr] gap-2">
+                                <select
+                                  value={draft.mode}
+                                  onChange={(event) =>
+                                    updateDraft(activeRow, index, { mode: event.target.value as BatchValueMode })
+                                  }
+                                  disabled={!draft.enabled}
+                                  className="rounded border border-slate-600 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 disabled:opacity-40"
+                                >
+                                  {(Object.keys(modeLabels) as BatchValueMode[]).map((mode) => (
+                                    <option key={mode} value={mode}>
+                                      {modeLabels[mode]}
+                                    </option>
+                                  ))}
+                                </select>
+                                <input
+                                  value={draft.value}
+                                  onChange={(event) => updateDraft(activeRow, index, { value: event.target.value })}
+                                  disabled={!draft.enabled}
+                                  placeholder={draft.mode === 'list' ? '1,4,7,98' : draft.mode === 'range' ? '1-4' : '1'}
+                                  className="min-w-0 rounded border border-slate-600 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 disabled:opacity-40"
+                                />
+                                {draft.mode === 'range' && (
+                                  <>
+                                    <span className="self-center text-xs text-slate-500">Increment</span>
+                                    <input
+                                      value={draft.increment}
+                                      onChange={(event) => updateDraft(activeRow, index, { increment: event.target.value })}
+                                      disabled={!draft.enabled}
+                                      placeholder="0.1"
+                                      className="min-w-0 rounded border border-slate-600 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 disabled:opacity-40"
+                                    />
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          )
+                        })}
                       </div>
                     </div>
-
-                    <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-                      {Array.from({ length: inspection.endUseCount }, (_, index) => {
-                        const key = keyFor(activeRow.id, index)
-                        const draft = drafts[key] ?? defaultDraft(activeRow.values[index] ?? '')
-                        return (
-                          <div key={key} className="rounded border border-slate-700 bg-slate-950 p-3">
-                            <label className="flex items-center justify-between gap-2">
-                              <span className="text-xs font-semibold text-slate-200">EndUse {index + 1}</span>
-                              <span className="font-mono text-[11px] text-slate-500">
-                                default {activeRow.values[index]}
-                              </span>
-                              <input
-                                type="checkbox"
-                                checked={draft.enabled}
-                                onChange={(event) => updateDraft(activeRow, index, { enabled: event.target.checked })}
-                                className="h-3.5 w-3.5"
-                              />
-                            </label>
-
-                            <div className="mt-3 grid grid-cols-[120px_1fr] gap-2">
-                              <select
-                                value={draft.mode}
-                                onChange={(event) =>
-                                  updateDraft(activeRow, index, { mode: event.target.value as BatchValueMode })
-                                }
-                                disabled={!draft.enabled}
-                                className="rounded border border-slate-600 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 disabled:opacity-40"
-                              >
-                                {(Object.keys(modeLabels) as BatchValueMode[]).map((mode) => (
-                                  <option key={mode} value={mode}>
-                                    {modeLabels[mode]}
-                                  </option>
-                                ))}
-                              </select>
-                              <input
-                                value={draft.value}
-                                onChange={(event) => updateDraft(activeRow, index, { value: event.target.value })}
-                                disabled={!draft.enabled}
-                                placeholder={draft.mode === 'list' ? '1,4,7,98' : draft.mode === 'range' ? '1-4' : '1'}
-                                className="min-w-0 rounded border border-slate-600 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 disabled:opacity-40"
-                              />
-                              {draft.mode === 'range' && (
-                                <>
-                                  <span className="self-center text-xs text-slate-500">Increment</span>
-                                  <input
-                                    value={draft.increment}
-                                    onChange={(event) => updateDraft(activeRow, index, { increment: event.target.value })}
-                                    disabled={!draft.enabled}
-                                    placeholder="0.1"
-                                    className="min-w-0 rounded border border-slate-600 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 disabled:opacity-40"
-                                  />
-                                </>
-                              )}
-                            </div>
-                          </div>
-                        )
-                      })}
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-sm text-slate-500">
+                      Select a trait or marker to edit EndUse values
                     </div>
-                  </div>
-                ) : (
-                  <div className="flex h-full items-center justify-center text-sm text-slate-500">
-                    Select a trait or marker to edit EndUse values
-                  </div>
-                )}
-              </div>
+                  )}
+                </div>
             </div>
           )}
 
