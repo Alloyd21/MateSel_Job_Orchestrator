@@ -1,4 +1,6 @@
 import { app, ipcMain, dialog, BrowserWindow, shell } from 'electron'
+import fs from 'fs'
+import path from 'path'
 import { IPC } from './channels'
 import { store } from '../store'
 import { enqueue, cancel, cancelAll, clearCompleted, getAllJobs, restartFailed, start, startAll } from '../jobQueue'
@@ -127,6 +129,21 @@ export function registerHandlers(win: BrowserWindow): void {
   })
 
   ipcMain.handle(IPC.SHELL_OPEN_PATH, async (_event, targetPath: string) => {
-    return shell.openPath(targetPath)
+    // This handler only ever opens local job/batch output directories. Restrict it to
+    // existing local directories so a compromised renderer can't use shell.openPath's
+    // ShellExecute semantics to launch arbitrary executables or trigger SMB auth to a
+    // remote UNC host.
+    if (typeof targetPath !== 'string') return 'Refused: invalid path'
+
+    const resolved = path.resolve(targetPath)
+    if (resolved.startsWith('\\\\')) return 'Refused: network path'
+
+    try {
+      if (!fs.statSync(resolved).isDirectory()) return 'Refused: not a directory'
+    } catch {
+      return 'Refused: path does not exist'
+    }
+
+    return shell.openPath(resolved)
   })
 }
