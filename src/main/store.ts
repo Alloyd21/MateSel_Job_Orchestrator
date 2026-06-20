@@ -1,12 +1,5 @@
 import Store from 'electron-store'
-
-export interface Settings {
-  exePath: string
-  stopExePath: string
-  outputRootDir: string
-  saveToInputFolder: boolean
-  maxConcurrent: number
-}
+import type { Settings } from '../shared'
 
 const defaults: Settings = {
   exePath: 'C:\\MateSel83178\\MateSelBatch.exe',

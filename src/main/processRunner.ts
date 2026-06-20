@@ -4,7 +4,7 @@ import path from 'path'
 import fs from 'fs'
 import { BrowserWindow } from 'electron'
 import { IPC } from './ipc/channels'
-import { copyInputFiles, prepareMateSelDataFile } from './fileManager'
+import { findFileNameCaseInsensitive, prepareMateSelDataFile } from './fileManager'
 
 export type JobCompleteCallback = (jobId: string, status: 'done' | 'failed', exitCode: number) => void
 export type JobStatusCallback = (patch: Record<string, unknown>) => void
@@ -166,6 +166,26 @@ function hasFatalMateSelOutput(text: string): boolean {
   return fatalOutputPatterns.some((pattern) => pattern.test(text))
 }
 
+function createStageTextHandler(onStatus: JobStatusCallback): (text: string) => void {
+  let currentStage: string | null = null
+  const iterState: IterationState = { inOptimization: false, currentGen: 0, lastImprovementGen: 0 }
+  let lastReportedIters: number | null = null
+
+  return (text) => {
+    const nextStage = detectMateSelStage(text)
+    if (nextStage && nextStage !== currentStage) {
+      currentStage = nextStage
+      onStatus({ stage: nextStage })
+    }
+
+    const iters = detectItersSinceLastChange(text, iterState)
+    if (iters !== lastReportedIters) {
+      lastReportedIters = iters
+      onStatus({ itersSinceLastChange: iters })
+    }
+  }
+}
+
 // Called once at startup — runs tasklist to get a reliable snapshot of all running PIDs.
 export function getRunningPidSet(): Set<number> {
   const pids = new Set<number>()
@@ -301,14 +321,9 @@ function saveConsoleLogToJobFolder(outputDir: string, jobFolder: string, fallbac
   }
 }
 
-function findExistingFile(folderPath: string, fileName: string): string | undefined {
-  const match = fs.readdirSync(folderPath).find((entry) => entry.toLowerCase() === fileName.toLowerCase())
-  return match ? path.join(folderPath, match) : undefined
-}
-
 function ensureMateSelToken(exePath: string): void {
   const exeDir = path.dirname(exePath)
-  if (!findExistingFile(exeDir, 'RunToken.txt')) {
+  if (!findFileNameCaseInsensitive(exeDir, 'RunToken.txt')) {
     throw new Error(`MateSel batch token not found. Put RunToken.txt beside ${exePath}.`)
   }
 }
@@ -334,7 +349,6 @@ for ($i = 0; $i -lt 20; $i++) {
 }
 
 function startJob(
-  win: BrowserWindow,
   jobFolder: string,
   jobId: string,
   outputDir: string,
@@ -358,49 +372,26 @@ function startJob(
 
   runningProcesses.set(jobId, child)
 
-  const sendLog = (text: string): void => {
-    onLog(text)
-  }
-
   if (child.pid) {
-    applyPerformanceTuning(child.pid, acquireCore(jobId), raisePriority, sendLog)
+    applyPerformanceTuning(child.pid, acquireCore(jobId), raisePriority, onLog)
     minimizeProcessWindow(child.pid)
   }
 
-  const sendStatus = (patch: object): void => {
-    onStatus(patch as Record<string, unknown>)
-  }
+  const handleStageText = createStageTextHandler(onStatus)
 
-  let currentStage: string | null = null
-  const iterState: IterationState = { inOptimization: false, currentGen: 0, lastImprovementGen: 0 }
-  let lastReportedIters: number | null = null
-  const handleStageText = (text: string): void => {
-    const nextStage = detectMateSelStage(text)
-    if (nextStage && nextStage !== currentStage) {
-      currentStage = nextStage
-      sendStatus({ stage: nextStage })
-    }
-
-    const iters = detectItersSinceLastChange(text, iterState)
-    if (iters !== lastReportedIters) {
-      lastReportedIters = iters
-      sendStatus({ itersSinceLastChange: iters })
-    }
-  }
-
-  sendStatus({ status: 'running', startedAt: Date.now(), stage: null, pid: child.pid })
+  onStatus({ status: 'running', startedAt: Date.now(), stage: null, pid: child.pid })
 
   let processOutput = ''
   const handleOutput = (data: Buffer): void => {
     const text = data.toString()
     processOutput += text
     handleStageText(text)
-    sendLog(text)
+    onLog(text)
   }
 
   child.stdout?.on('data', handleOutput)
   child.stderr?.on('data', handleOutput)
-  startConsoleLogStreaming(jobId, outputDir, exeDir, sendLog, handleStageText)
+  startConsoleLogStreaming(jobId, outputDir, exeDir, onLog, handleStageText)
 
   child.on('close', (code) => {
     runningProcesses.delete(jobId)
@@ -414,14 +405,14 @@ function startJob(
       saveConsoleLogToJobFolder(outputDir, jobFolder, consoleOutput || processOutput)
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
-      sendLog(`[Orchestrator] Failed to save Console.txt to job folder: ${msg}\n`)
+      onLog(`[Orchestrator] Failed to save Console.txt to job folder: ${msg}\n`)
     }
     if (cancellingJobs.delete(jobId)) return
 
     if (hasFatalOutput) {
-      sendLog('[Orchestrator] MateSel reported a fatal error despite the process exit code.\n')
+      onLog('[Orchestrator] MateSel reported a fatal error despite the process exit code.\n')
     }
-    sendStatus({ status, exitCode, finishedAt: Date.now(), stage: null })
+    onStatus({ status, exitCode, finishedAt: Date.now(), stage: null })
     onComplete(jobId, status, exitCode)
   })
 
@@ -431,8 +422,8 @@ function startJob(
     stopConsoleLogStreaming(jobId)
     if (cancellingJobs.delete(jobId)) return
 
-    sendLog(`[Orchestrator] Failed to start process: ${err.message}\n`)
-    sendStatus({ status: 'failed', exitCode: -1, finishedAt: Date.now(), stage: null })
+    onLog(`[Orchestrator] Failed to start process: ${err.message}\n`)
+    onStatus({ status: 'failed', exitCode: -1, finishedAt: Date.now(), stage: null })
     onComplete(jobId, 'failed', -1)
   })
 }
@@ -458,10 +449,10 @@ export function prepareAndStart(
 
   try {
     if (path.resolve(jobFolder) !== path.resolve(outputDir)) {
-      copyInputFiles(jobFolder, outputDir)
+      fs.cpSync(jobFolder, outputDir, { recursive: true, force: true })
     }
     ensureMateSelToken(exePath)
-    startJob(win, jobFolder, jobId, outputDir, exePath, dataFileName, raisePriority, onComplete, sendStatus, sendLog)
+    startJob(jobFolder, jobId, outputDir, exePath, dataFileName, raisePriority, onComplete, sendStatus, sendLog)
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
     sendStatus({
@@ -488,22 +479,7 @@ export function reattachToRunningJob(
   const exeDir = path.dirname(exePath)
   orphanedPids.set(jobId, pid)
 
-  let currentStage: string | null = null
-  const iterState: IterationState = { inOptimization: false, currentGen: 0, lastImprovementGen: 0 }
-  let lastReportedIters: number | null = null
-  const handleStageText = (text: string): void => {
-    const nextStage = detectMateSelStage(text)
-    if (nextStage && nextStage !== currentStage) {
-      currentStage = nextStage
-      onStatus({ stage: nextStage })
-    }
-
-    const iters = detectItersSinceLastChange(text, iterState)
-    if (iters !== lastReportedIters) {
-      lastReportedIters = iters
-      onStatus({ itersSinceLastChange: iters })
-    }
-  }
+  const handleStageText = createStageTextHandler(onStatus)
 
   onLog(`[Orchestrator] Reconnected to running MateSel process (PID: ${pid}).\n`)
   startConsoleLogStreaming(jobId, outputDir, exeDir, onLog, handleStageText)

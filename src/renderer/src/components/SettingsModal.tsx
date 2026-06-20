@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { Settings } from '../types/job'
+import type { Settings } from '../../../shared'
 
 interface SettingsModalProps {
   onClose: () => void
@@ -34,7 +34,7 @@ export function SettingsModal({ onClose }: SettingsModalProps): JSX.Element {
   const save = async (): Promise<void> => {
     if (!settings) return
     setSaving(true)
-    await window.mateselAPI.setSettings(settings as unknown as Record<string, unknown>)
+    await window.mateselAPI.setSettings(settings)
     setSaving(false)
     onClose()
   }

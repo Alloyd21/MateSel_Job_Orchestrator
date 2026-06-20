@@ -1,54 +1,17 @@
 import fs from 'fs'
 import path from 'path'
-import { findMateSelDataFileName, listJobFolderFiles } from './fileManager'
-
-export type BatchWeightingKind = 'trait' | 'marker'
-export type BatchValueMode = 'value' | 'range' | 'list'
-
-export interface BatchWeightingRow {
-  id: string
-  kind: BatchWeightingKind
-  name: string
-  lineIndex: number
-  values: string[]
-}
-
-export interface BatchInspectResult {
-  valid: boolean
-  warnings: string[]
-  needsDataFile: boolean
-  dataFileName?: string
-  weightingFileName?: string
-  files: string[]
-  endUseCount: number
-  traits: BatchWeightingRow[]
-  markers: BatchWeightingRow[]
-  markerLocusCount: number
-}
-
-export interface BatchVariationSpec {
-  rowId: string
-  endUseIndex: number
-  mode: BatchValueMode
-  value: string
-  increment?: string
-}
-
-export interface BatchGenerateRequest {
-  starterFolder: string
-  destinationParent: string
-  batchName?: string
-  batchTimestamp?: string
-  selectedDataFileName?: string
-  variations: BatchVariationSpec[]
-  allowLargeBatch?: boolean
-}
-
-export interface BatchGenerateResult {
-  batchFolder: string
-  generatedFolders: string[]
-  dataFileName?: string
-}
+import {
+  expandBatchVariationValues,
+  makeBatchTimestamp,
+  sanitizeFolderSegment,
+  type BatchGeneratePayload,
+  type BatchGenerateResult,
+  type BatchInspectResult,
+  type BatchVariationSpec,
+  type BatchWeightingKind,
+  type BatchWeightingRow
+} from '../shared'
+import { findFileNameCaseInsensitive, findMateSelDataFileName, listJobFolderFiles } from './fileManager'
 
 interface NumericColumn {
   start: number
@@ -83,23 +46,6 @@ interface RunChange {
 
 const MAX_RUNS_WITHOUT_CONFIRM = 500
 export const MAX_GENERATED_BATCH_RUNS = 1000
-const numericPattern = '[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?'
-
-function hasFileCaseInsensitive(folderPath: string, fileName: string): boolean {
-  try {
-    return fs.readdirSync(folderPath).some((entry) => entry.toLowerCase() === fileName.toLowerCase())
-  } catch {
-    return false
-  }
-}
-
-function findFileCaseInsensitive(folderPath: string, fileName: string): string | undefined {
-  try {
-    return fs.readdirSync(folderPath).find((entry) => entry.toLowerCase() === fileName.toLowerCase())
-  } catch {
-    return undefined
-  }
-}
 
 function deriveMarkerLocusCount(markerWeightingRowCount: number): number {
   if (markerWeightingRowCount <= 0) return 0
@@ -108,67 +54,6 @@ function deriveMarkerLocusCount(markerWeightingRowCount: number): number {
 
 function normalizeNumberText(value: string): string {
   return value.replace(/\s+/g, '')
-}
-
-function parseFiniteNumber(value: string, label: string): number {
-  const normalized = normalizeNumberText(value.trim())
-  if (!normalized) throw new Error(`${label} is empty`)
-  const number = Number(normalized)
-  if (!Number.isFinite(number)) throw new Error(`${label} must be numeric`)
-  return number
-}
-
-function formatGeneratedNumber(value: number): string {
-  if (Number.isInteger(value)) return String(value)
-  return value.toFixed(12).replace(/0+$/, '').replace(/\.$/, '')
-}
-
-function decimalPlaces(value: string): number {
-  const normalized = normalizeNumberText(value).toLowerCase()
-  const [mantissa, exponentText] = normalized.split('e')
-  const exponent = exponentText == null ? 0 : Number(exponentText)
-  const decimalIndex = mantissa.indexOf('.')
-  const places = decimalIndex === -1 ? 0 : mantissa.length - decimalIndex - 1
-  return Math.max(0, places - exponent)
-}
-
-function expandValueSpec(spec: BatchVariationSpec): string[] {
-  if (spec.mode === 'value') {
-    return [formatGeneratedNumber(parseFiniteNumber(spec.value, 'Value'))]
-  }
-
-  if (spec.mode === 'list') {
-    const values = spec.value.split(',').map((value) => value.trim()).filter(Boolean)
-    if (values.length === 0) throw new Error('List must contain at least one numeric value')
-    return values.map((value, index) => formatGeneratedNumber(parseFiniteNumber(value, `List value ${index + 1}`)))
-  }
-
-  const rangeRegex = new RegExp(`^\\s*(${numericPattern})\\s*-\\s*(${numericPattern})\\s*$`)
-  const match = spec.value.match(rangeRegex)
-  if (!match) throw new Error('Range must use the form start-end, such as 1-4')
-
-  const start = parseFiniteNumber(match[1], 'Range start')
-  const end = parseFiniteNumber(match[2], 'Range end')
-  const increment = parseFiniteNumber(spec.increment ?? '', 'Range increment')
-  if (increment <= 0) throw new Error('Range increment must be greater than 0')
-  if (end < start) throw new Error('Range end must be greater than or equal to range start')
-
-  const precision = Math.min(
-    12,
-    Math.max(decimalPlaces(match[1]), decimalPlaces(match[2]), decimalPlaces(spec.increment ?? '')) + 2
-  )
-  const values: string[] = []
-  const epsilon = Math.abs(increment) / 1_000_000
-  for (let current = start; current <= end + epsilon; current += increment) {
-    values.push(formatGeneratedNumber(Number(current.toFixed(precision))))
-    if (values.length > 10000) throw new Error('Range expands to too many values')
-  }
-  if (values.length === 0) throw new Error('Range produced no values')
-  return values
-}
-
-export function expandBatchVariationValues(spec: BatchVariationSpec): string[] {
-  return expandValueSpec(spec)
 }
 
 function parseLeadingNumericColumns(line: string, count: number): { columns: NumericColumn[]; rest: string } | null {
@@ -283,7 +168,7 @@ function readWeightingFile(starterFolder: string): { fileName: string; content: 
   const errors: string[] = []
 
   for (const candidateName of candidateNames) {
-    const fileName = findFileCaseInsensitive(starterFolder, candidateName)
+    const fileName = findFileNameCaseInsensitive(starterFolder, candidateName)
     if (!fileName) continue
 
     const content = fs.readFileSync(path.join(starterFolder, fileName), 'utf8')
@@ -304,7 +189,7 @@ export function inspectBatchStarter(starterFolder: string): BatchInspectResult {
   const dataFileName = fs.existsSync(starterFolder) ? findMateSelDataFileName(starterFolder) : undefined
 
   if (!fs.existsSync(starterFolder)) warnings.push('Starter folder does not exist')
-  if (!hasFileCaseInsensitive(starterFolder, 'Matesel.ini')) warnings.push('Missing Matesel.ini')
+  if (!findFileNameCaseInsensitive(starterFolder, 'Matesel.ini')) warnings.push('Missing Matesel.ini')
 
   const needsDataFile = !dataFileName
   if (needsDataFile) warnings.push('No recognised MateSel data file found')
@@ -329,7 +214,7 @@ export function inspectBatchStarter(starterFolder: string): BatchInspectResult {
   const markerLocusCount = deriveMarkerLocusCount(markers.length)
   const valid =
     fs.existsSync(starterFolder) &&
-    hasFileCaseInsensitive(starterFolder, 'Matesel.ini') &&
+    Boolean(findFileNameCaseInsensitive(starterFolder, 'Matesel.ini')) &&
     Boolean(weightingFileName) &&
     endUseCount > 0 &&
     traits.length > 0 &&
@@ -358,17 +243,9 @@ function ensureDestinationParentAllowed(starterFolder: string, destinationParent
   }
 }
 
-function makeTimestamp(): string {
-  return new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, 19)
-}
-
-function sanitizeFolderSegment(value: string): string {
-  return value.trim().replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').replace(/[. ]+$/, '')
-}
-
 function normalizeBatchTimestamp(value?: string): string {
   if (value && /^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$/.test(value)) return value
-  return makeTimestamp()
+  return makeBatchTimestamp()
 }
 
 function createUniqueBatchFolder(
@@ -462,7 +339,7 @@ function validateCombinationCount(combinationCount: number): void {
   }
 }
 
-export function generateBatchJobs(request: BatchGenerateRequest): BatchGenerateResult {
+export function generateBatchJobs(request: BatchGeneratePayload): BatchGenerateResult {
   if (!fs.existsSync(request.starterFolder)) throw new Error('Starter folder does not exist')
   if (!fs.existsSync(request.destinationParent)) throw new Error('Destination parent does not exist')
   ensureDestinationParentAllowed(request.starterFolder, request.destinationParent)
@@ -472,7 +349,7 @@ export function generateBatchJobs(request: BatchGenerateRequest): BatchGenerateR
   if (!fs.existsSync(path.join(request.starterFolder, dataFileName))) {
     throw new Error(`Selected data file not found: ${dataFileName}`)
   }
-  if (!hasFileCaseInsensitive(request.starterFolder, 'Matesel.ini')) throw new Error('Missing Matesel.ini')
+  if (!findFileNameCaseInsensitive(request.starterFolder, 'Matesel.ini')) throw new Error('Missing Matesel.ini')
 
   const weightingFile = readWeightingFile(request.starterFolder)
   const parsed = parseInpOneGroupContent(weightingFile.content, weightingFile.fileName)
@@ -485,7 +362,7 @@ export function generateBatchJobs(request: BatchGenerateRequest): BatchGenerateR
     if (!Number.isInteger(spec.endUseIndex) || spec.endUseIndex < 0 || spec.endUseIndex >= parsed.endUseCount) {
       throw new Error(`Invalid EndUse index for ${row.name}`)
     }
-    return { spec, values: expandValueSpec(spec), row }
+    return { spec, values: expandBatchVariationValues(spec), row }
   })
 
   if (expanded.length === 0) throw new Error('Select at least one weighting value to vary')

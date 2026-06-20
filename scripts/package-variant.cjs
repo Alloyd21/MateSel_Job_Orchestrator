@@ -1,4 +1,4 @@
-const { spawnSync } = require('node:child_process')
+const { execFileSync } = require('node:child_process')
 const path = require('node:path')
 
 const rootDir = path.resolve(__dirname, '..')
@@ -18,33 +18,24 @@ function buildRenderer() {
   const env = { ...process.env, MATESEL_AUTO_UPDATE: String(autoUpdate) }
   delete env.ELECTRON_RUN_AS_NODE
 
-  const result = spawnSync(process.execPath, [electronViteBin, 'build'], {
+  execFileSync(process.execPath, [electronViteBin, 'build'], {
     cwd: rootDir,
     stdio: 'inherit',
     env
   })
-
-  if (result.error) {
-    console.error(result.error.message)
-    process.exit(1)
-  }
-  if (result.status !== 0) {
-    process.exit(result.status ?? 1)
-  }
 }
 
 // 2) Package with electron-builder. The `config` passed to the Node API merges over the
 //    `build` block in package.json (deepAssign), so we only override what differs per variant.
 async function packageVariant() {
+  buildRenderer()
   const builder = require('electron-builder')
   const { Platform } = builder
 
   const publish = autoUpdate && process.env.CI ? 'always' : 'never'
 
   const config = autoUpdate
-    ? {
-        win: { target: ['nsis'] }
-      }
+    ? {}
     : {
         directories: { output: 'dist-standalone' },
         win: { target: ['nsis', 'portable'] },
@@ -60,7 +51,6 @@ async function packageVariant() {
   })
 }
 
-buildRenderer()
 packageVariant()
   .then(() => {
     console.log(`Built ${variant} variant.`)

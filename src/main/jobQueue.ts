@@ -2,35 +2,19 @@ import path from 'path'
 import { randomUUID } from 'node:crypto'
 import { BrowserWindow } from 'electron'
 import Store from 'electron-store'
+import type { BatchChangeRow, Job } from '../shared'
 import { IPC } from './ipc/channels'
-import { createOutputDir, findMateSelDataFileName, readBatchChanges, type BatchChangeRow } from './fileManager'
+import { createOutputDir, findMateSelDataFileName, readBatchChanges } from './fileManager'
 import { prepareAndStart, cancelProcess, getRunningPidSet, reattachToRunningJob } from './processRunner'
 import { store } from './store'
 
-export interface QueuedJob {
-  id: string
-  name: string
-  jobFolder: string
-  outputDir: string
-  dataFileName?: string
-  status: 'ready' | 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
-  stage?: string | null
-  startedAt?: number
-  finishedAt?: number
-  exitCode?: number
-  itersSinceLastChange?: number | null
-  aboveNormalPriority?: boolean
+interface QueuedJob extends Job {
   pid?: number
-  log: string[]
   batchChanges: BatchChangeRow[]
 }
 
-interface JobCache {
-  jobs: QueuedJob[]
-}
-
-const MAX_LOG_LINES = 5000
-const jobCache = new Store<JobCache>({
+const MAX_LOG_LINES = 50000
+const jobCache = new Store<{ jobs: QueuedJob[] }>({
   name: 'job-cache',
   defaults: { jobs: [] }
 })
@@ -181,21 +165,31 @@ export function enqueue(jobFolder: string, dataFileName?: string): void {
   win.webContents.send(IPC.JOB_STATUS_UPDATE, { ...job })
 }
 
-export function cancel(jobId: string): void {
-  if (!win) return
-  const job = queue.find((j) => j.id === jobId)
-  if (!job) return
-
+function cancelJob(job: QueuedJob): void {
   if (job.status === 'running') {
-    cancelProcess(jobId, store.get('stopExePath'))
-    runningIds.delete(jobId)
+    cancelProcess(job.id, store.get('stopExePath'))
+    runningIds.delete(job.id)
   }
 
   job.status = 'cancelled'
   job.finishedAt = Date.now()
   job.stage = null
   job.aboveNormalPriority = false
-  sendStatusUpdate(jobId, { status: 'cancelled', finishedAt: job.finishedAt, stage: null, itersSinceLastChange: null, aboveNormalPriority: false })
+  sendStatusUpdate(job.id, {
+    status: job.status,
+    finishedAt: job.finishedAt,
+    stage: null,
+    itersSinceLastChange: null,
+    aboveNormalPriority: false
+  })
+}
+
+export function cancel(jobId: string): void {
+  if (!win) return
+  const job = queue.find((j) => j.id === jobId)
+  if (!job) return
+
+  cancelJob(job)
   tick()
 }
 
@@ -204,22 +198,7 @@ export function cancelAll(): void {
   for (const job of queue) {
     if (!['queued', 'running'].includes(job.status)) continue
 
-    if (job.status === 'running') {
-      cancelProcess(job.id, store.get('stopExePath'))
-      runningIds.delete(job.id)
-    }
-
-    job.status = 'cancelled'
-    job.finishedAt = Date.now()
-    job.stage = null
-    job.aboveNormalPriority = false
-    sendStatusUpdate(job.id, {
-      status: job.status,
-      finishedAt: job.finishedAt,
-      stage: null,
-      itersSinceLastChange: null,
-      aboveNormalPriority: false
-    })
+    cancelJob(job)
   }
   tick()
 }
@@ -260,16 +239,17 @@ export function restartFailed(jobId: string): void {
   tick()
 }
 
+function queueJob(job: QueuedJob): void {
+  job.status = 'queued'
+  sendStatusUpdate(job.id, { status: job.status, stage: null })
+}
+
 export function start(jobId: string): void {
   if (!win) return
   const job = queue.find((j) => j.id === jobId)
   if (!job || job.status !== 'ready') return
 
-  job.status = 'queued'
-  sendStatusUpdate(job.id, {
-    status: job.status,
-    stage: null
-  })
+  queueJob(job)
   tick()
 }
 
@@ -278,11 +258,7 @@ export function startAll(): void {
   for (const job of queue) {
     if (job.status !== 'ready') continue
 
-    job.status = 'queued'
-    sendStatusUpdate(job.id, {
-      status: job.status,
-      stage: null
-    })
+    queueJob(job)
   }
   tick()
 }

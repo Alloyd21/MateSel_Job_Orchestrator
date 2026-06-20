@@ -2,8 +2,8 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { expandBatchVariationValues } from '../shared'
 import {
-  expandBatchVariationValues,
   generateBatchJobs,
   inspectBatchStarter,
   MAX_GENERATED_BATCH_RUNS,
@@ -102,6 +102,9 @@ describe('expandBatchVariationValues', () => {
   })
 
   it('rejects invalid specs', () => {
+    expect(() =>
+      expandBatchVariationValues({ rowId: 'trait:1', endUseIndex: 0, mode: 'value', value: '' })
+    ).toThrow(/empty/)
     expect(() =>
       expandBatchVariationValues({ rowId: 'trait:1', endUseIndex: 0, mode: 'list', value: '' })
     ).toThrow(/at least one/)

@@ -1,4 +1,4 @@
-import type { Job, JobStatus } from '../types/job'
+import type { Job, JobStatus } from '../../../shared'
 import { JobCard } from './JobCard'
 
 interface JobQueuePanelProps {

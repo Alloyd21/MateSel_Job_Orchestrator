@@ -1,11 +1,14 @@
 import { useMemo, useState } from 'react'
-import type {
-  BatchGenerateResult,
-  BatchInspectResult,
-  BatchValueMode,
-  BatchVariationSpec,
-  BatchWeightingRow
-} from '../globals'
+import {
+  expandBatchVariationValues,
+  makeBatchTimestamp,
+  sanitizeFolderSegment,
+  type BatchGenerateResult,
+  type BatchInspectResult,
+  type BatchValueMode,
+  type BatchVariationSpec,
+  type BatchWeightingRow
+} from '../../../shared'
 
 interface BatchGeneratorDialogProps {
   onClose: () => void
@@ -37,42 +40,6 @@ function defaultDraft(value = ''): VariationDraft {
   return { enabled: false, mode: 'value', value, increment: '1' }
 }
 
-function normalizeNumber(value: string): number {
-  const number = Number(value.trim())
-  if (!Number.isFinite(number)) throw new Error('Enter numeric values only')
-  return number
-}
-
-function formatNumber(value: number): string {
-  if (Number.isInteger(value)) return String(value)
-  return value.toFixed(12).replace(/0+$/, '').replace(/\.$/, '')
-}
-
-function expandDraft(draft: VariationDraft): string[] {
-  if (draft.mode === 'value') return [formatNumber(normalizeNumber(draft.value))]
-  if (draft.mode === 'list') {
-    const values = draft.value.split(',').map((value) => value.trim()).filter(Boolean)
-    if (values.length === 0) throw new Error('Lists need at least one value')
-    return values.map((value) => formatNumber(normalizeNumber(value)))
-  }
-
-  const match = draft.value.match(/^\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))\s*-\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))\s*$/)
-  if (!match) throw new Error('Ranges need the form 1-4')
-  const start = normalizeNumber(match[1])
-  const end = normalizeNumber(match[2])
-  const increment = normalizeNumber(draft.increment)
-  if (increment <= 0) throw new Error('Range increment must be greater than 0')
-  if (end < start) throw new Error('Range end must be greater than or equal to start')
-
-  const values: string[] = []
-  const epsilon = increment / 1_000_000
-  for (let current = start; current <= end + epsilon; current += increment) {
-    values.push(formatNumber(Number(current.toFixed(12))))
-    if (values.length > 10000) throw new Error('Range expands to too many values')
-  }
-  return values
-}
-
 function isOnlyDataFileWarning(inspection: BatchInspectResult): boolean {
   return (
     inspection.needsDataFile &&
@@ -81,24 +48,9 @@ function isOnlyDataFileWarning(inspection: BatchInspectResult): boolean {
   )
 }
 
-function hasBatchApi(): boolean {
-  return (
-    typeof window.mateselAPI.inspectBatchStarter === 'function' &&
-    typeof window.mateselAPI.generateBatchJobs === 'function'
-  )
-}
-
-function makeBatchTimestamp(): string {
-  return new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, 19)
-}
-
 function folderBaseName(folder: string): string {
   const parts = folder.split(/[\\/]/).filter(Boolean)
   return parts.length > 0 ? parts[parts.length - 1] : ''
-}
-
-function sanitizeFolderSegment(value: string): string {
-  return value.trim().replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').replace(/[. ]+$/, '')
 }
 
 export function BatchGeneratorDialog({ onClose }: BatchGeneratorDialogProps): JSX.Element {
@@ -141,7 +93,7 @@ export function BatchGeneratorDialog({ onClose }: BatchGeneratorDialogProps): JS
       if (enabledSpecs.length === 0) return { count: 0, error: null as string | null }
       const count = enabledSpecs.reduce((total, spec) => {
         const draft = drafts[keyFor(spec.rowId, spec.endUseIndex)]
-        return total * expandDraft(draft).length
+        return total * expandBatchVariationValues(spec).length
       }, 1)
       return { count, error: null as string | null }
     } catch (err: unknown) {
@@ -166,11 +118,6 @@ export function BatchGeneratorDialog({ onClose }: BatchGeneratorDialogProps): JS
     !loading
 
   const browseStarter = async (): Promise<void> => {
-    if (!hasBatchApi()) {
-      setError('Batch Generator API is not loaded. Fully quit and restart the app so Electron reloads the preload script.')
-      return
-    }
-
     const folders = await window.mateselAPI.openFolderDialog(false)
     if (folders.length === 0) return
 
@@ -234,11 +181,6 @@ export function BatchGeneratorDialog({ onClose }: BatchGeneratorDialogProps): JS
 
   const handleGenerate = async (): Promise<void> => {
     if (!canGenerate || !inspection) return
-    if (!hasBatchApi()) {
-      setError('Batch Generator API is not loaded. Fully quit and restart the app so Electron reloads the preload script.')
-      return
-    }
-
     const destinationFolders = await window.mateselAPI.openFolderDialog(false)
     if (destinationFolders.length === 0) return
 

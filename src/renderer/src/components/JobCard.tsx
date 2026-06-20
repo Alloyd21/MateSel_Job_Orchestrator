@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { Job } from '../types/job'
+import type { Job } from '../../../shared'
 import { StatusBadge } from './StatusBadge'
 
 function PlayIcon(): JSX.Element {

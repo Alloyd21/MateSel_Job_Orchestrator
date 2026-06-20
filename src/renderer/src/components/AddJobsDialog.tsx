@@ -1,5 +1,5 @@
 import { useState, type DragEvent } from 'react'
-import type { AddJobRequest, AddJobResult } from '../globals'
+import type { AddJobRequest, AddJobResult } from '../../../shared'
 
 interface AddJobsDialogProps {
   onClose: () => void

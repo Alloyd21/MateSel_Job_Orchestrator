@@ -8,10 +8,7 @@
     "strict": true,
     "skipLibCheck": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "paths": {
-      "@renderer/*": ["./src/renderer/src/*"]
-    },
     "outDir": "out"
   },
-  "include": ["src/renderer/src/**/*"]
+  "include": ["src/shared.ts", "src/renderer/src/**/*"]
 }

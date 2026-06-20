@@ -1,4 +1,4 @@
-import type { JobStatus } from '../types/job'
+import type { JobStatus } from '../../../shared'
 
 const config: Record<JobStatus, { label: string; classes: string }> = {
   ready: { label: 'Ready', classes: 'bg-emerald-800 text-emerald-100' },

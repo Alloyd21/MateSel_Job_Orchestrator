@@ -1,38 +1,12 @@
 import { app, ipcMain, dialog, BrowserWindow, shell } from 'electron'
 import fs from 'fs'
 import path from 'path'
+import type { AddJobRequest, AddJobResult, BatchGeneratePayload } from '../../shared'
 import { IPC } from './channels'
 import { store } from '../store'
 import { enqueue, cancel, cancelAll, clearCompleted, getAllJobs, restartFailed, start, startAll } from '../jobQueue'
 import { discoverJobFolders, validateJobFolder } from '../fileManager'
-import { generateBatchJobs, inspectBatchStarter, type BatchVariationSpec } from '../batchGenerator'
-
-interface AddJobRequest {
-  folder: string
-  dataFileName?: string
-}
-
-interface AddJobResult {
-  folder: string
-  valid: boolean
-  warnings: string[]
-  needsDataFile?: boolean
-  files?: string[]
-}
-
-interface BatchGeneratePayload {
-  starterFolder: string
-  destinationParent: string
-  batchName?: string
-  batchTimestamp?: string
-  selectedDataFileName?: string
-  variations: BatchVariationSpec[]
-  allowLargeBatch?: boolean
-}
-
-function normalizeAddJobRequest(request: string | AddJobRequest): AddJobRequest {
-  return typeof request === 'string' ? { folder: request } : request
-}
+import { generateBatchJobs, inspectBatchStarter } from '../batchGenerator'
 
 export function registerHandlers(win: BrowserWindow): void {
   ipcMain.handle(IPC.APP_GET_VERSION, () => app.getVersion())
@@ -52,7 +26,7 @@ export function registerHandlers(win: BrowserWindow): void {
   })
 
   ipcMain.handle(IPC.JOB_ADD, (_event, jobRequests: Array<string | AddJobRequest>) => {
-    const requests = jobRequests.map(normalizeAddJobRequest)
+    const requests = jobRequests.map((request) => typeof request === 'string' ? { folder: request } : request)
     const foldersWithoutExplicitDataFile = requests
       .filter((request) => !request.dataFileName)
       .map((request) => request.folder)

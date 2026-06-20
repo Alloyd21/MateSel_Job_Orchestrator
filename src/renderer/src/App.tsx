@@ -1,18 +1,18 @@
 import { useEffect, useState } from 'react'
-import { useJobStore } from './store/jobStore'
+import { appendJobLog, applyStatusUpdate } from './jobState'
 import { JobQueuePanel } from './components/JobQueuePanel'
 import { JobDetailPanel } from './components/JobDetailPanel'
 import { AddJobsDialog } from './components/AddJobsDialog'
 import { BatchGeneratorDialog } from './components/BatchGeneratorDialog'
 import { SettingsModal } from './components/SettingsModal'
-import type { Job, JobStatus } from './types/job'
-import type { AddJobRequest, AddJobResult, UpdateReadyPayload } from './globals'
+import type { Job, JobStatus, UpdateReadyPayload } from '../../shared'
 
 const terminalStatuses: JobStatus[] = ['done', 'failed', 'cancelled']
 const githubUrl = 'https://github.com/Alloyd21/MateSel_Job_Orchestrator'
 
 export default function App(): JSX.Element {
-  const { jobs, selectedJobId, selectJob, applyStatusUpdate, appendLog } = useJobStore()
+  const [jobs, setJobs] = useState<Job[]>([])
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null)
   const [showAddJobs, setShowAddJobs] = useState(false)
   const [showBatchGenerator, setShowBatchGenerator] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
@@ -23,17 +23,17 @@ export default function App(): JSX.Element {
 
   useEffect(() => {
     window.mateselAPI.getAppVersion().then(setAppVersion)
-    window.mateselAPI.getAllJobs().then((existing: Job[]) => {
-      for (const job of existing) applyStatusUpdate(job)
+    window.mateselAPI.getAllJobs().then((existing) => {
+      for (const job of existing) setJobs((current) => applyStatusUpdate(current, job))
     })
   }, [])
 
   useEffect(() => {
     const unsubStatus = window.mateselAPI.onStatusUpdate((patch) => {
-      applyStatusUpdate(patch as Partial<Job> & { id: string })
+      setJobs((current) => applyStatusUpdate(current, patch))
     })
     const unsubLog = window.mateselAPI.onLogChunk(({ jobId, text }) => {
-      appendLog(jobId, text)
+      setJobs((current) => appendJobLog(current, jobId, text))
     })
     return () => {
       unsubStatus()
@@ -49,39 +49,13 @@ export default function App(): JSX.Element {
     return unsubscribe
   }, [])
 
-  const handleAddJobs = async (jobsToAdd: Array<string | AddJobRequest>): Promise<AddJobResult[]> => {
-    return window.mateselAPI.addJobs(jobsToAdd)
-  }
-
-  const handleCancel = async (jobId: string): Promise<void> => {
-    await window.mateselAPI.cancelJob(jobId)
-  }
-
-  const handleCancelAll = async (): Promise<void> => {
-    await window.mateselAPI.cancelAllJobs()
-  }
-
-  const handleRestart = async (jobId: string): Promise<void> => {
-    await window.mateselAPI.restartJob(jobId)
-  }
-
-  const handleStart = async (jobId: string): Promise<void> => {
-    await window.mateselAPI.startJob(jobId)
-  }
-
-  const handleStartAll = async (): Promise<void> => {
-    await window.mateselAPI.startAllJobs()
-  }
-
   const handleClearCompleted = async (): Promise<void> => {
     const completedIds = new Set(
       jobs.filter((j) => terminalStatuses.includes(j.status)).map((j) => j.id)
     )
     await window.mateselAPI.clearCompletedJobs()
-    useJobStore.setState((state) => ({
-      jobs: state.jobs.filter((j) => !completedIds.has(j.id)),
-      selectedJobId: completedIds.has(state.selectedJobId ?? '') ? null : state.selectedJobId
-    }))
+    setJobs((current) => current.filter((job) => !completedIds.has(job.id)))
+    setSelectedJobId((current) => completedIds.has(current ?? '') ? null : current)
   }
 
   const handleInstallUpdate = async (): Promise<void> => {
@@ -167,10 +141,10 @@ export default function App(): JSX.Element {
           <JobQueuePanel
             jobs={jobs}
             selectedJobId={selectedJobId}
-            onSelect={selectJob}
-            onStart={handleStart}
-            onStartAll={handleStartAll}
-            onStopAll={handleCancelAll}
+            onSelect={setSelectedJobId}
+            onStart={window.mateselAPI.startJob}
+            onStartAll={window.mateselAPI.startAllJobs}
+            onStopAll={window.mateselAPI.cancelAllJobs}
             onClearCompleted={handleClearCompleted}
             onAddJobs={() => setShowAddJobs(true)}
           />
@@ -180,9 +154,9 @@ export default function App(): JSX.Element {
           {selectedJob ? (
             <JobDetailPanel
               job={selectedJob}
-              onCancel={handleCancel}
-              onStart={handleStart}
-              onRestart={handleRestart}
+              onCancel={window.mateselAPI.cancelJob}
+              onStart={window.mateselAPI.startJob}
+              onRestart={window.mateselAPI.restartJob}
             />
           ) : (
             <div className="flex items-center justify-center h-full text-slate-500 text-sm">
@@ -195,7 +169,7 @@ export default function App(): JSX.Element {
       {showAddJobs && (
         <AddJobsDialog
           onClose={() => setShowAddJobs(false)}
-          onAdd={handleAddJobs}
+          onAdd={window.mateselAPI.addJobs}
         />
       )}
       {showBatchGenerator && (

@@ -1,11 +1,8 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { autoUpdater } from 'electron-updater'
+import type { UpdateReadyPayload } from '../shared'
 import { IPC } from './ipc/channels'
 import { hasActiveJobs, onQueueActivityChange } from './jobQueue'
-
-interface UpdateReadyPayload {
-  version: string | null
-}
 
 let win: BrowserWindow | null = null
 let registered = false

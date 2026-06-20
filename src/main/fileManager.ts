@@ -1,13 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-
-export interface BatchChangeRow {
-  item: string
-  type: string
-  endUse: string
-  defaultValue: string
-  thisRun: string
-}
+import type { BatchChangeRow } from '../shared'
 
 export function createOutputDir(outputRoot: string, jobName: string): string {
   const timestamp = new Date()
@@ -21,7 +14,7 @@ export function createOutputDir(outputRoot: string, jobName: string): string {
   return fullPath
 }
 
-function findFileNameCaseInsensitive(folderPath: string, fileName: string): string | undefined {
+export function findFileNameCaseInsensitive(folderPath: string, fileName: string): string | undefined {
   try {
     return fs.readdirSync(folderPath).find((entry) => entry.toLowerCase() === fileName.toLowerCase())
   } catch {
@@ -49,11 +42,6 @@ export function readBatchChanges(folderPath: string): BatchChangeRow[] {
       defaultValue: defaultValue.trim(),
       thisRun: thisRun.trim()
     }))
-}
-
-export function copyInputFiles(jobFolder: string, outputDir: string): void {
-  // force: true so existing files in the destination are overwritten, never left stale.
-  fs.cpSync(jobFolder, outputDir, { recursive: true, force: true })
 }
 
 export function findMateSelDataFileName(folderPath: string): string | undefined {

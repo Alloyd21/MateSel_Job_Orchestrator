@@ -1,4 +1,4 @@
-import type { Job } from '../types/job'
+import type { Job } from '../../../shared'
 import { LogViewer } from './LogViewer'
 import { StatusBadge } from './StatusBadge'
 
