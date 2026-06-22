@@ -4,8 +4,10 @@ import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   discoverJobFolders,
+  deleteOutputFiles,
   findMateSelDataFileName,
   listJobFolderFiles,
+  listOutputFiles,
   prepareMateSelDataFile,
   readBatchChanges,
   validateJobFolder
@@ -312,5 +314,23 @@ describe('listJobFolderFiles', () => {
     fs.mkdirSync(path.join(tempDir, 'nested'))
 
     expect(listJobFolderFiles(tempDir)).toEqual(['a.txt', 'z.csv'])
+  })
+})
+
+describe('output file cleanup', () => {
+  it('finds and deletes Out-prefixed files only', () => {
+    writeFile('OutResults.txt')
+    writeFile('output.log')
+    writeFile('About.txt')
+    fs.mkdirSync(path.join(tempDir, 'OutFolder'))
+
+    expect(listOutputFiles(tempDir).map((filePath) => path.basename(filePath)).sort()).toEqual([
+      'OutResults.txt',
+      'output.log'
+    ])
+
+    deleteOutputFiles([tempDir])
+
+    expect(fs.readdirSync(tempDir).sort()).toEqual(['About.txt', 'OutFolder'])
   })
 })

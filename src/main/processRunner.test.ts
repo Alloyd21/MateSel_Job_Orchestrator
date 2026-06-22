@@ -2,7 +2,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { reattachToRunningJob } from './processRunner'
+import { createStageTextHandler, reattachToRunningJob } from './processRunner'
 
 let tempDir: string
 
@@ -87,5 +87,18 @@ describe('reattachToRunningJob', () => {
     )
     expect(onLog).toHaveBeenCalledWith('[Orchestrator] MateSel reported a fatal error.\n')
     expect(onLog).not.toHaveBeenCalledWith(expect.stringContaining('original exit code is unavailable'))
+  })
+})
+
+describe('MateSel progress parsing', () => {
+  it('reports the latest Conv% from complete and chunked optimization rows', () => {
+    const onStatus = vi.fn()
+    const handleText = createStageTextHandler(onStatus)
+
+    handleText('FrontierDone = true\r\n  10 11 3 1.2 55.5 2.0\r\n  20 21       72')
+    handleText('.25 3.0\r\n')
+
+    expect(onStatus).toHaveBeenCalledWith({ convergencePercent: 55.5 })
+    expect(onStatus).toHaveBeenLastCalledWith({ convergencePercent: 72.25 })
   })
 })

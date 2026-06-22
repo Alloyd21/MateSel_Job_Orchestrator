@@ -19,58 +19,11 @@ const orphanedPids = new Map<string, number>()
 const completionPollers = new Map<string, NodeJS.Timeout>()
 const cancellingJobs = new Set<string>()
 
-// CPU core pool: each running worker is pinned to its own logical core so the
-// OS scheduler stops bouncing them between cores and they don't fight over the
-// same caches. os.cpus() reports logical processors (physical cores * threads).
-const totalCores = os.cpus().length
-const freeCores: number[] = Array.from({ length: totalCores }, (_, i) => i)
-const jobCores = new Map<string, number>()
-
-// Returns a free logical core index for this job, or undefined when every core
-// is already taken (more concurrent workers than cores) — those run unpinned.
-function acquireCore(jobId: string): number | undefined {
-  const core = freeCores.shift()
-  if (core != null) jobCores.set(jobId, core)
-  return core
-}
-
-function releaseCore(jobId: string): void {
-  const core = jobCores.get(jobId)
-  if (core == null) return
-  jobCores.delete(jobId)
-  freeCores.push(core)
-}
-
-// Sets the worker's CPU affinity to a single logical core via PowerShell.
-// BigInt builds the bitmask so it stays correct past 31 cores (JS bit-shifts
-// are 32-bit); ProcessorAffinity is a 64-bit IntPtr on 64-bit Windows.
-function setProcessAffinity(pid: number, coreIndex: number): void {
-  const mask = (1n << BigInt(coreIndex)).toString()
-  const command = `
-for ($i = 0; $i -lt 20; $i++) {
-  try {
-    $process = Get-Process -Id ${pid} -ErrorAction Stop
-    $process.ProcessorAffinity = [IntPtr]${mask}
-    break
-  } catch {
-    Start-Sleep -Milliseconds 100
-  }
-}
-`
-  const child = spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', command], {
-    windowsHide: true,
-    stdio: 'ignore'
-  })
-  child.unref()
-}
-
 // Raises the worker above other apps (ABOVE_NORMAL, not HIGH/REALTIME which can
-// starve the OS) and pins it to a dedicated core when one is available.
-// Priority is only raised when threads outnumber active jobs so workers don't
-// contend with each other at elevated priority.
+// starve the OS). The OS scheduler distributes workers across logical processors.
+// Priority is only raised when configured capacity exceeds active jobs.
 function applyPerformanceTuning(
   pid: number,
-  coreIndex: number | undefined,
   raisePriority: boolean,
   sendLog: (text: string) => void
 ): void {
@@ -83,16 +36,7 @@ function applyPerformanceTuning(
     }
   }
 
-  if (coreIndex != null) {
-    setProcessAffinity(pid, coreIndex)
-    sendLog(
-      `[Orchestrator] Pinned worker to CPU core ${coreIndex} of ${totalCores}${raisePriority ? ', priority Above Normal' : ''}.\n`
-    )
-  } else {
-    sendLog(
-      `[Orchestrator] All ${totalCores} cores assigned; worker runs unpinned${raisePriority ? ' at priority Above Normal' : ''}.\n`
-    )
-  }
+  if (raisePriority) sendLog('[Orchestrator] Worker priority set to Above Normal.\n')
 }
 
 const fatalOutputPatterns = [
@@ -166,22 +110,40 @@ function hasFatalMateSelOutput(text: string): boolean {
   return fatalOutputPatterns.some((pattern) => pattern.test(text))
 }
 
-function createStageTextHandler(onStatus: JobStatusCallback): (text: string) => void {
+export function createStageTextHandler(onStatus: JobStatusCallback): (text: string) => void {
   let currentStage: string | null = null
   const iterState: IterationState = { inOptimization: false, currentGen: 0, lastImprovementGen: 0 }
   let lastReportedIters: number | null = null
+  let lastReportedConvergence: number | null = null
+  let pendingText = ''
 
   return (text) => {
-    const nextStage = detectMateSelStage(text)
+    const lines = `${pendingText}${text}`.split(/\r?\n/)
+    pendingText = lines.pop() ?? ''
+    const completeText = lines.join('\n')
+    if (!completeText) return
+
+    const nextStage = detectMateSelStage(completeText)
     if (nextStage && nextStage !== currentStage) {
       currentStage = nextStage
       onStatus({ stage: nextStage })
     }
 
-    const iters = detectItersSinceLastChange(text, iterState)
+    const iters = detectItersSinceLastChange(completeText, iterState)
     if (iters !== lastReportedIters) {
       lastReportedIters = iters
       onStatus({ itersSinceLastChange: iters })
+    }
+
+    if (!iterState.inOptimization) return
+    for (const line of lines) {
+      const values = line.trim().split(/\s+/)
+      if (values.length < 4 || !/^\d+$/.test(values[0]) || !/^\d+$/.test(values[1])) continue
+      const convergence = Number(values.at(-2))
+      const seconds = Number(values.at(-1))
+      if (!Number.isFinite(convergence) || !Number.isFinite(seconds) || convergence === lastReportedConvergence) continue
+      lastReportedConvergence = convergence
+      onStatus({ convergencePercent: convergence })
     }
   }
 }
@@ -373,7 +335,7 @@ function startJob(
   runningProcesses.set(jobId, child)
 
   if (child.pid) {
-    applyPerformanceTuning(child.pid, acquireCore(jobId), raisePriority, onLog)
+    applyPerformanceTuning(child.pid, raisePriority, onLog)
     minimizeProcessWindow(child.pid)
   }
 
@@ -395,7 +357,6 @@ function startJob(
 
   child.on('close', (code) => {
     runningProcesses.delete(jobId)
-    releaseCore(jobId)
     stopConsoleLogStreaming(jobId)
     const exitCode = code ?? -1
     const consoleOutput = readConsoleLog(outputDir) || readConsoleLog(exeDir)
@@ -418,7 +379,6 @@ function startJob(
 
   child.on('error', (err) => {
     runningProcesses.delete(jobId)
-    releaseCore(jobId)
     stopConsoleLogStreaming(jobId)
     if (cancellingJobs.delete(jobId)) return
 

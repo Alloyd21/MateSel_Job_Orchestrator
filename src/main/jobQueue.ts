@@ -1,9 +1,10 @@
 import path from 'path'
 import { randomUUID } from 'node:crypto'
-import { BrowserWindow } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import Store from 'electron-store'
 import type { BatchChangeRow, Job } from '../shared'
 import { IPC } from './ipc/channels'
+import { maxConcurrentJobs } from './systemCapacity'
 import { createOutputDir, findMateSelDataFileName, readBatchChanges } from './fileManager'
 import { prepareAndStart, cancelProcess, getRunningPidSet, reattachToRunningJob } from './processRunner'
 import { store } from './store'
@@ -20,6 +21,7 @@ const jobCache = new Store<{ jobs: QueuedJob[] }>({
 })
 
 let win: BrowserWindow | null = null
+let persistTimer: NodeJS.Timeout | undefined
 const pendingReattach: string[] = []
 const alivePids = getRunningPidSet()
 
@@ -73,6 +75,7 @@ let lastActiveState = queue.some((job) => job.status === 'queued' || job.status 
 export function init(mainWindow: BrowserWindow): void {
   win = mainWindow
   persistJobs()
+  app.once('before-quit', persistJobs)
 
   for (const jobId of pendingReattach) {
     const job = queue.find((j) => j.id === jobId)
@@ -120,14 +123,21 @@ function notifyQueueActivityIfChanged(): void {
 }
 
 function persistJobs(): void {
-  jobCache.set('jobs', queue)
+  if (persistTimer) clearTimeout(persistTimer)
+  persistTimer = undefined
+  jobCache.set('jobs', queue.map((job) => ({ ...job, log: [] })))
+}
+
+function persistJobsSoon(): void {
+  if (persistTimer) return
+  persistTimer = setTimeout(persistJobs, 1000)
 }
 
 function sendStatusUpdate(jobId: string, patch: Record<string, unknown>): void {
   const job = queue.find((j) => j.id === jobId)
   if (job) Object.assign(job, patch)
 
-  persistJobs()
+  persistJobsSoon()
   notifyQueueActivityIfChanged()
   if (!win) return
   win.webContents.send(IPC.JOB_STATUS_UPDATE, { id: jobId, ...patch })
@@ -138,7 +148,7 @@ function sendLogChunk(jobId: string, text: string): void {
   if (job) {
     const lines = [...job.log, ...text.split('\n').filter(Boolean)]
     job.log = lines.slice(-MAX_LOG_LINES)
-    persistJobs()
+    persistJobsSoon()
   }
 
   if (!win) return
@@ -203,10 +213,10 @@ export function cancelAll(): void {
   tick()
 }
 
-export function clearCompleted(): void {
+export function clearCompleted(includeReady = false): void {
   const terminalStatuses = new Set(['done', 'failed', 'cancelled'])
   for (let index = queue.length - 1; index >= 0; index -= 1) {
-    if (terminalStatuses.has(queue[index].status)) {
+    if (terminalStatuses.has(queue[index].status) || (includeReady && queue[index].status === 'ready')) {
       queue.splice(index, 1)
     }
   }
@@ -224,6 +234,7 @@ export function restartFailed(jobId: string): void {
   delete job.finishedAt
   delete job.exitCode
   job.stage = null
+  job.convergencePercent = null
   job.log = []
 
   sendStatusUpdate(job.id, {
@@ -234,6 +245,7 @@ export function restartFailed(jobId: string): void {
     exitCode: null,
     stage: null,
     itersSinceLastChange: null,
+    convergencePercent: null,
     log: []
   })
   tick()
@@ -289,7 +301,7 @@ function onJobComplete(jobId: string, status: 'done' | 'failed', exitCode: numbe
 
 function tick(): void {
   if (!win) return
-  const maxConcurrent = Math.max(1, store.get('maxConcurrent'))
+  const maxConcurrent = Math.min(maxConcurrentJobs, Math.max(1, store.get('maxConcurrent')))
 
   while (runningIds.size < maxConcurrent) {
     const next = queue.find((j) => j.status === 'queued')
@@ -322,8 +334,7 @@ function tick(): void {
       stage: null
     })
 
-    const totalActiveJobs = queue.filter((j) => j.status === 'queued' || j.status === 'running').length
-    const raisePriority = maxConcurrent > totalActiveJobs
+    const raisePriority = maxConcurrent < maxConcurrentJobs
 
     next.aboveNormalPriority = raisePriority
     sendStatusUpdate(next.id, { aboveNormalPriority: raisePriority })

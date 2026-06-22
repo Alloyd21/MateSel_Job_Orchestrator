@@ -11,13 +11,14 @@ const api: MateSelAPI = {
   addJobs: (jobs) => ipcRenderer.invoke(IPC.JOB_ADD, jobs),
   cancelJob: (jobId: string) => ipcRenderer.invoke(IPC.JOB_CANCEL, jobId),
   cancelAllJobs: () => ipcRenderer.invoke(IPC.JOB_CANCEL_ALL),
-  clearCompletedJobs: () => ipcRenderer.invoke(IPC.JOB_CLEAR_COMPLETED),
+  clearCompletedJobs: (includeReady = false) => ipcRenderer.invoke(IPC.JOB_CLEAR_COMPLETED, includeReady),
   restartJob: (jobId: string) => ipcRenderer.invoke(IPC.JOB_RESTART, jobId),
   startJob: (jobId: string) => ipcRenderer.invoke(IPC.JOB_START, jobId),
   startAllJobs: () => ipcRenderer.invoke(IPC.JOB_START_ALL),
 
   getSettings: () => ipcRenderer.invoke(IPC.SETTINGS_GET),
   setSettings: (patch) => ipcRenderer.invoke(IPC.SETTINGS_SET, patch),
+  getSystemCapacity: () => ipcRenderer.invoke(IPC.SYSTEM_CAPACITY_GET),
 
   openFolderDialog: (discoverJobs = true) => ipcRenderer.invoke(IPC.DIALOG_OPEN_FOLDER, discoverJobs),
   openFileDialog: (filters) => ipcRenderer.invoke(IPC.DIALOG_OPEN_FILE, filters),

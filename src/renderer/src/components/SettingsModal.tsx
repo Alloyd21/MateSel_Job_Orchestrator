@@ -1,18 +1,26 @@
 import { useEffect, useState } from 'react'
-import type { Settings } from '../../../shared'
+import type { Settings, SystemCapacity } from '../../../shared'
 
 interface SettingsModalProps {
   onClose: () => void
 }
 
-const coreCount = navigator.hardwareConcurrency || 0
-
 export function SettingsModal({ onClose }: SettingsModalProps): JSX.Element {
   const [settings, setSettings] = useState<Settings | null>(null)
+  const [capacity, setCapacity] = useState<SystemCapacity | null>(null)
   const [saving, setSaving] = useState(false)
+  const maxJobs = capacity?.maxConcurrentJobs ?? 1
 
   useEffect(() => {
-    window.mateselAPI.getSettings().then(setSettings)
+    Promise.all([window.mateselAPI.getSettings(), window.mateselAPI.getSystemCapacity()]).then(
+      ([value, systemCapacity]) => {
+        setCapacity(systemCapacity)
+        setSettings({
+          ...value,
+          maxConcurrent: Math.min(value.maxConcurrent, systemCapacity.maxConcurrentJobs)
+        })
+      }
+    )
   }, [])
 
   const patch = (key: keyof Settings, value: string | number | boolean): void => {
@@ -39,7 +47,7 @@ export function SettingsModal({ onClose }: SettingsModalProps): JSX.Element {
     onClose()
   }
 
-  if (!settings) {
+  if (!settings || !capacity) {
     return (
       <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
         <div className="text-slate-400 text-sm">Loading settings...</div>
@@ -97,32 +105,22 @@ export function SettingsModal({ onClose }: SettingsModalProps): JSX.Element {
             <input
               type="range"
               min={1}
-              max={100}
+              max={maxJobs}
               value={settings.maxConcurrent}
               onChange={(e) => patch('maxConcurrent', Number(e.target.value))}
               className="w-full accent-blue-500"
             />
             <div className="flex justify-between text-xs text-slate-500 mt-0.5">
               <span>1</span>
-              <span>100</span>
+              <span>{maxJobs}</span>
             </div>
             <p className="text-xs text-slate-500 mt-2 leading-relaxed">
-              {coreCount > 0 ? (
-                <>
-                  Detected <span className="text-slate-300 font-medium">{coreCount} logical cores</span>. Each
-                  worker runs at Above Normal priority (above other apps).{' '}
-                  {settings.maxConcurrent <= coreCount ? (
-                    <>Every parallel worker will be pinned to its own dedicated core.</>
-                  ) : (
-                    <>
-                      The first {coreCount} workers will each be pinned to a core; the remaining{' '}
-                      {settings.maxConcurrent - coreCount} run unpinned.
-                    </>
-                  )}
-                </>
-              ) : (
-                <>Each worker runs at Above Normal priority; core pinning applies when cores are available.</>
-              )}
+              Detected{' '}
+              <span className="text-slate-300 font-medium">
+                {capacity.logicalProcessors} logical processors
+              </span>
+              . The maximum is limited to 80% to leave
+              capacity for the operating system and other applications.
             </p>
           </Field>
         </div>

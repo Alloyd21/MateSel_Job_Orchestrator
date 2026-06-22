@@ -256,3 +256,16 @@ export function listJobFolderFiles(folderPath: string): string[] {
     .map((entry) => entry.name)
     .sort((a, b) => a.localeCompare(b))
 }
+
+export function listOutputFiles(folderPath: string): string[] {
+  return fs
+    .readdirSync(folderPath, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && /^out/i.test(entry.name))
+    .map((entry) => path.join(folderPath, entry.name))
+}
+
+export function deleteOutputFiles(folderPaths: string[]): void {
+  for (const folderPath of folderPaths) {
+    for (const filePath of listOutputFiles(folderPath)) fs.unlinkSync(filePath)
+  }
+}

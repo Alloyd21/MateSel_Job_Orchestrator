@@ -13,6 +13,7 @@ export function AddJobsDialog({ onClose, onAdd }: AddJobsDialogProps): JSX.Eleme
   const [selectedDataFiles, setSelectedDataFiles] = useState<Record<string, string>>({})
   const [draggingFolders, setDraggingFolders] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [outputConfirmationJobs, setOutputConfirmationJobs] = useState<Array<string | AddJobRequest> | null>(null)
   const hasAllSelectedDataFiles =
     pendingDataFiles.length === 0 ||
     pendingDataFiles.every((result) => Boolean(selectedDataFiles[result.folder]))
@@ -52,12 +53,14 @@ export function AddJobsDialog({ onClose, onAdd }: AddJobsDialogProps): JSX.Eleme
     })
   }
 
-  const handleAdd = async (): Promise<void> => {
-    if (folders.length === 0) return
+  const submit = async (jobs: Array<string | AddJobRequest>): Promise<void> => {
     setLoading(true)
-    const foldersToAdd = folders.filter((folder) => !queuedFolders.has(folder))
-    const results = await onAdd(foldersToAdd)
+    const results = await onAdd(jobs)
     setLoading(false)
+    if (results.some((result) => result.hasOutputFiles)) {
+      setOutputConfirmationJobs(jobs)
+      return
+    }
     const needsDataFiles = results.filter((result) => result.needsDataFile)
     const queued = results.filter((result) => result.valid && !result.needsDataFile).map((result) => result.folder)
     setQueuedFolders((prev) => new Set([...prev, ...queued]))
@@ -73,6 +76,11 @@ export function AddJobsDialog({ onClose, onAdd }: AddJobsDialogProps): JSX.Eleme
     onClose()
   }
 
+  const handleAdd = async (): Promise<void> => {
+    if (folders.length === 0) return
+    await submit(folders.filter((folder) => !queuedFolders.has(folder)))
+  }
+
   const handleAddSelectedDataFiles = async (): Promise<void> => {
     const jobs = pendingDataFiles
       .map((result) => ({
@@ -85,17 +93,17 @@ export function AddJobsDialog({ onClose, onAdd }: AddJobsDialogProps): JSX.Eleme
 
     if (jobs.length !== pendingDataFiles.length) return
 
-    setLoading(true)
-    const results = await onAdd(jobs)
-    setLoading(false)
-    const unresolved = results.filter((result) => result.needsDataFile || !result.valid)
-    if (unresolved.length > 0) {
-      setPendingDataFiles(unresolved)
-      return
-    }
+    await submit(jobs)
+  }
 
-    setQueuedFolders((prev) => new Set([...prev, ...jobs.map((job) => job.folder)]))
-    onClose()
+  const confirmOutputDeletion = async (): Promise<void> => {
+    if (!outputConfirmationJobs) return
+    const jobs = outputConfirmationJobs.map((job) => ({
+      ...(typeof job === 'string' ? { folder: job } : job),
+      deleteExistingOutput: true
+    }))
+    setOutputConfirmationJobs(null)
+    await submit(jobs)
   }
 
   return (
@@ -203,6 +211,23 @@ export function AddJobsDialog({ onClose, onAdd }: AddJobsDialogProps): JSX.Eleme
           </button>
         </div>
       </div>
+
+      {outputConfirmationJobs && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70" role="dialog" aria-modal="true" aria-labelledby="output-warning-title">
+          <div className="mx-4 w-full max-w-md rounded-xl border border-slate-700 bg-slate-800 shadow-2xl">
+            <div className="border-b border-slate-700 px-5 py-4">
+              <h2 id="output-warning-title" className="text-base font-semibold text-slate-100">Existing output files</h2>
+            </div>
+            <div className="px-5 py-4 text-sm text-slate-300">
+              One or more project folders already contain output files. Files whose names start with <span className="font-mono text-slate-100">Out</span> will be deleted when these jobs are loaded. Are you sure?
+            </div>
+            <div className="flex justify-end gap-2 border-t border-slate-700 px-5 py-3">
+              <button onClick={() => setOutputConfirmationJobs(null)} className="rounded bg-slate-700 px-4 py-1.5 text-sm text-slate-200 hover:bg-slate-600">Cancel</button>
+              <button onClick={confirmOutputDeletion} className="rounded bg-red-600 px-4 py-1.5 text-sm text-white hover:bg-red-500">Delete and add</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

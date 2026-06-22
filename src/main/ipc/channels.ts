@@ -14,6 +14,7 @@ export const IPC = {
   APP_GET_VERSION: 'app:get-version',
   SETTINGS_GET: 'settings:get',
   SETTINGS_SET: 'settings:set',
+  SYSTEM_CAPACITY_GET: 'system-capacity:get',
   DIALOG_OPEN_FOLDER: 'dialog:open-folder',
   DIALOG_OPEN_FILE: 'dialog:open-file',
   SHELL_OPEN_PATH: 'shell:open-path',

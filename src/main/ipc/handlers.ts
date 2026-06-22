@@ -5,8 +5,9 @@ import type { AddJobRequest, AddJobResult, BatchGeneratePayload } from '../../sh
 import { IPC } from './channels'
 import { store } from '../store'
 import { enqueue, cancel, cancelAll, clearCompleted, getAllJobs, restartFailed, start, startAll } from '../jobQueue'
-import { discoverJobFolders, validateJobFolder } from '../fileManager'
+import { deleteOutputFiles, discoverJobFolders, listOutputFiles, validateJobFolder } from '../fileManager'
 import { generateBatchJobs, inspectBatchStarter } from '../batchGenerator'
+import { logicalProcessors, maxConcurrentJobs } from '../systemCapacity'
 
 export function registerHandlers(win: BrowserWindow): void {
   ipcMain.handle(IPC.APP_GET_VERSION, () => app.getVersion())
@@ -25,15 +26,14 @@ export function registerHandlers(win: BrowserWindow): void {
     return result
   })
 
-  ipcMain.handle(IPC.JOB_ADD, (_event, jobRequests: Array<string | AddJobRequest>) => {
+  ipcMain.handle(IPC.JOB_ADD, async (_event, jobRequests: Array<string | AddJobRequest>) => {
     const requests = jobRequests.map((request) => typeof request === 'string' ? { folder: request } : request)
     const foldersWithoutExplicitDataFile = requests
       .filter((request) => !request.dataFileName)
       .map((request) => request.folder)
-    const explicitRequests = requests.filter((request): request is Required<AddJobRequest> =>
+    const explicitRequests = requests.filter((request): request is AddJobRequest & { dataFileName: string } =>
       Boolean(request.dataFileName)
     )
-    const results: AddJobResult[] = []
     const discoveredFolders = discoverJobFolders(foldersWithoutExplicitDataFile)
     const foldersToQueue: AddJobRequest[] = [
       ...explicitRequests,
@@ -41,10 +41,25 @@ export function registerHandlers(win: BrowserWindow): void {
         folder
       }))
     ]
-
-    for (const { folder, dataFileName } of foldersToQueue) {
+    const jobs = foldersToQueue.map(({ folder, dataFileName }) => {
       const validation = dataFileName ? { valid: true, warnings: [] } : validateJobFolder(folder)
-      results.push({ folder, ...validation })
+      return { folder, dataFileName, validation }
+    })
+    const foldersWithOutput = jobs
+      .filter(({ validation }) => validation.valid)
+      .map(({ folder }) => folder)
+      .filter((folder) => listOutputFiles(folder).length > 0)
+    const deleteExistingOutput = requests.length > 0 && requests.every((request) => request.deleteExistingOutput)
+    const results: AddJobResult[] = jobs.map(({ folder, validation }) => ({
+      folder,
+      ...validation,
+      hasOutputFiles: !deleteExistingOutput && foldersWithOutput.includes(folder) || undefined
+    }))
+
+    if (foldersWithOutput.length > 0 && !deleteExistingOutput) return results
+    if (foldersWithOutput.length > 0) deleteOutputFiles(foldersWithOutput)
+
+    for (const { folder, dataFileName, validation } of jobs) {
       if (validation.valid) enqueue(folder, dataFileName)
     }
     return results
@@ -58,8 +73,8 @@ export function registerHandlers(win: BrowserWindow): void {
     cancelAll()
   })
 
-  ipcMain.handle(IPC.JOB_CLEAR_COMPLETED, () => {
-    clearCompleted()
+  ipcMain.handle(IPC.JOB_CLEAR_COMPLETED, (_event, includeReady = false) => {
+    clearCompleted(includeReady)
   })
 
   ipcMain.handle(IPC.JOB_RESTART, (_event, jobId: string) => {
@@ -76,9 +91,18 @@ export function registerHandlers(win: BrowserWindow): void {
 
   ipcMain.handle(IPC.SETTINGS_GET, () => store.store)
 
+  ipcMain.handle(IPC.SYSTEM_CAPACITY_GET, () => ({ logicalProcessors, maxConcurrentJobs }))
+
   ipcMain.handle(IPC.SETTINGS_SET, (_event, patch: Record<string, unknown>) => {
     for (const [key, value] of Object.entries(patch)) {
-      store.set(key as never, value as never)
+      if (key === 'maxConcurrent') {
+        const requested = Number(value)
+        if (Number.isFinite(requested)) {
+          store.set(key, Math.min(maxConcurrentJobs, Math.max(1, Math.floor(requested))))
+        }
+      } else {
+        store.set(key as never, value as never)
+      }
     }
   })
 

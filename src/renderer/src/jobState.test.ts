@@ -45,4 +45,8 @@ describe('job state', () => {
     expect(updated.log[0]).toBe('line 2')
     expect(updated.log.at(-1)).toBe('line 50001')
   })
+
+  it('does not recreate a cleared job from a delayed status update', () => {
+    expect(applyStatusUpdate([], { id: 'cleared-job', status: 'cancelled' })).toEqual([])
+  })
 })

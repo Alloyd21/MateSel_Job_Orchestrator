@@ -20,6 +20,7 @@ export interface Job {
   finishedAt?: number | null
   exitCode?: number | null
   itersSinceLastChange?: number | null
+  convergencePercent?: number | null
   aboveNormalPriority?: boolean
   log: string[]
   batchChanges?: BatchChangeRow[]
@@ -33,9 +34,15 @@ export interface Settings {
   maxConcurrent: number
 }
 
+export interface SystemCapacity {
+  logicalProcessors: number
+  maxConcurrentJobs: number
+}
+
 export interface AddJobRequest {
   folder: string
   dataFileName?: string
+  deleteExistingOutput?: boolean
 }
 
 export interface AddJobResult {
@@ -44,6 +51,7 @@ export interface AddJobResult {
   warnings: string[]
   needsDataFile?: boolean
   files?: string[]
+  hasOutputFiles?: boolean
 }
 
 export type BatchWeightingKind = 'trait' | 'marker'
@@ -111,12 +119,13 @@ export interface MateSelAPI {
   addJobs: (jobs: Array<string | AddJobRequest>) => Promise<AddJobResult[]>
   cancelJob: (jobId: string) => Promise<void>
   cancelAllJobs: () => Promise<void>
-  clearCompletedJobs: () => Promise<void>
+  clearCompletedJobs: (includeReady?: boolean) => Promise<void>
   restartJob: (jobId: string) => Promise<void>
   startJob: (jobId: string) => Promise<void>
   startAllJobs: () => Promise<void>
   getSettings: () => Promise<Settings>
   setSettings: (patch: Partial<Settings>) => Promise<void>
+  getSystemCapacity: () => Promise<SystemCapacity>
   openFolderDialog: (discoverJobs?: boolean) => Promise<string[]>
   openFileDialog: (filters: FileFilter[]) => Promise<string | null>
   getDroppedFilePath: (file: File) => string

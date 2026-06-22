@@ -185,7 +185,7 @@ export function JobDetailPanel({
         </div>
         {job.itersSinceLastChange != null && (
           <div>
-            <span className="text-slate-500">Iters since last change</span>
+            <span className="text-slate-500">GensSinceChange</span>
             <div className="font-mono text-slate-200">{job.itersSinceLastChange.toLocaleString()}</div>
           </div>
         )}

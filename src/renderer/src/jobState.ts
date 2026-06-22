@@ -10,6 +10,8 @@ export function applyStatusUpdate(jobs: Job[], patch: Partial<Job> & { id: strin
     )
   }
 
+  if (patch.name == null || patch.jobFolder == null) return jobs
+
   return [
     ...jobs,
     {
