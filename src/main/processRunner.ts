@@ -282,6 +282,41 @@ function saveConsoleLogToJobFolder(outputDir: string, jobFolder: string, fallbac
     fs.writeFileSync(jobConsolePath, fallbackText)
   }
 }
+function toSpaceSafePath(filePath: string): string {
+  if (!filePath.includes(' ')) return filePath
+
+  // Resolve the 8.3 name via PowerShell's FileSystemObject. The path is passed
+  // through an env var rather than embedded in the command string: cmd.exe
+  // mangles the backslash-escaped quotes Node adds around an inline path, which
+  // is why a naive `cmd /c for ...` returns nothing here.
+  try {
+    const result = spawnSync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-Command',
+        '(New-Object -ComObject Scripting.FileSystemObject).GetFile($env:MATESEL_DATA_FILE).ShortPath'
+      ],
+      {
+        windowsHide: true,
+        encoding: 'utf8',
+        env: { ...process.env, MATESEL_DATA_FILE: filePath }
+      }
+    )
+    const shortPath = (result.stdout as string | undefined)?.trim()
+    if (shortPath && !shortPath.includes(' ') && fs.existsSync(shortPath)) {
+      return shortPath
+    }
+  } catch {
+    /* fall through to the error below */
+  }
+
+  throw new Error(
+    `MateSel cannot read a data file from a path with spaces, and no 8.3 short name ` +
+      `is available for "${filePath}". Use an output folder without spaces in its path, ` +
+      `or enable 8.3 short-name creation on the drive.`
+  )
+}
 
 function ensureMateSelToken(exePath: string): void {
   const exeDir = path.dirname(exePath)
@@ -322,7 +357,7 @@ function startJob(
   onLog: JobLogCallback
 ): void {
   const preparedDataFileName = prepareMateSelDataFile(outputDir, dataFileName, onLog)
-  const dataFilePath = path.join(outputDir, preparedDataFileName)
+  const dataFilePath = toSpaceSafePath(path.join(outputDir, preparedDataFileName))
   const exeDir = path.dirname(exePath)
 
   const child = spawn(exePath, [dataFilePath], {

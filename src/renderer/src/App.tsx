@@ -246,7 +246,10 @@ export default function App(): JSX.Element {
         />
       )}
       {showBatchGenerator && (
-        <BatchGeneratorDialog onClose={() => setShowBatchGenerator(false)} />
+        <BatchGeneratorDialog
+          onClose={() => setShowBatchGenerator(false)}
+          onGenerated={async () => setJobs(await window.mateselAPI.getAllJobs())}
+        />
       )}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
     </div>

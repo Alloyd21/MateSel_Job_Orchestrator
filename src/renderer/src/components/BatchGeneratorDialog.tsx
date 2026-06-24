@@ -12,6 +12,7 @@ import {
 
 interface BatchGeneratorDialogProps {
   onClose: () => void
+  onGenerated?: () => void | Promise<void>
 }
 
 interface VariationDraft {
@@ -55,7 +56,7 @@ function folderBaseName(folder: string): string {
   return parts.length > 0 ? parts[parts.length - 1] : ''
 }
 
-export function BatchGeneratorDialog({ onClose }: BatchGeneratorDialogProps): JSX.Element {
+export function BatchGeneratorDialog({ onClose, onGenerated }: BatchGeneratorDialogProps): JSX.Element {
   const [starterFolder, setStarterFolder] = useState('')
   const [batchJobName, setBatchJobName] = useState('')
   const [batchTimestamp, setBatchTimestamp] = useState(makeBatchTimestamp())
@@ -202,6 +203,7 @@ export function BatchGeneratorDialog({ onClose }: BatchGeneratorDialogProps): JS
         allowLargeBatch
       })
       setResult(generated)
+      await onGenerated?.()
       onClose()
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err))
