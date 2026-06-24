@@ -32,16 +32,34 @@ interface ParsedInpOneGroup {
   lines: string[]
 }
 
+interface ParsedIniRow extends BatchWeightingRow {
+  column: NumericColumn
+  nextColumnStart: number
+}
+
+interface ParsedMateselIni {
+  fileName: string
+  rows: ParsedIniRow[]
+  lineEnding: string
+  lines: string[]
+}
+
 interface ExpandedVariation {
   spec: BatchVariationSpec
   values: string[]
 }
 
+type ParsedRow = ParsedLineRow | ParsedIniRow
+
 interface RunChange {
-  row: ParsedLineRow
+  row: ParsedRow
   endUseIndex: number
   defaultValue: string
   generatedValue: string
+}
+
+function isIniRow(row: ParsedRow): row is ParsedIniRow {
+  return row.kind === 'ini'
 }
 
 const MAX_RUNS_WITHOUT_CONFIRM = 500
@@ -106,7 +124,7 @@ function parseRows(
   return rows
 }
 
-function toPublicRows(rows: ParsedLineRow[]): BatchWeightingRow[] {
+function toPublicRows(rows: BatchWeightingRow[]): BatchWeightingRow[] {
   return rows.map(({ id, kind, name, lineIndex, values }) => ({ id, kind, name, lineIndex, values }))
 }
 
@@ -150,6 +168,54 @@ function parseInpOneGroupContent(content: string, fileName = 'InpOneGroup.txt'):
   return { fileName, endUseCount, traits, markers, lineEnding, lines }
 }
 
+const MATESEL_HISTOGRAM_HEADER =
+  /^\s*Item\s+Invoked\s+ControlType\s+Weighting\s+Target1\s+Target2\s+Target3/i
+
+export function parseMateselHistogram(content: string, fileName = 'Matesel.ini'): ParsedMateselIni {
+  const lineEnding = content.includes('\r\n') ? '\r\n' : '\n'
+  const lines = content.split(/\r?\n/)
+  const headerIndex = lines.findIndex((line) => MATESEL_HISTOGRAM_HEADER.test(line))
+  if (headerIndex === -1) {
+    throw new Error(`${fileName} is missing the Item/Invoked/ControlType/Weighting histogram table`)
+  }
+
+  const rows: ParsedIniRow[] = []
+  for (let lineIndex = headerIndex + 1; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex]
+    if (!line.trim()) continue
+
+    // Item name is the leading non-whitespace token, followed by numeric columns.
+    const nameMatch = line.match(/^\s*(\S+)/)
+    if (!nameMatch) continue
+    const nameEnd = nameMatch[0].length
+    // Need Invoked, ControlType, Weighting, Target1 to locate the Weighting field.
+    const parsed = parseLeadingNumericColumns(line.slice(nameEnd), 4)
+    if (!parsed) continue
+
+    const columns = parsed.columns.map((column) => ({
+      start: column.start + nameEnd,
+      end: column.end + nameEnd,
+      raw: column.raw
+    }))
+    const weighting = columns[2]
+    const nextColumnStart = columns[3].start
+
+    rows.push({
+      id: `ini:${lineIndex}`,
+      kind: 'ini',
+      name: nameMatch[1],
+      lineIndex,
+      values: [normalizeNumberText(weighting.raw)],
+      column: weighting,
+      nextColumnStart
+    })
+  }
+
+  if (rows.length === 0) throw new Error(`No histogram rows were found in ${fileName}`)
+
+  return { fileName, rows, lineEnding, lines }
+}
+
 export function parseInpOneGroup(content: string): {
   endUseCount: number
   traits: BatchWeightingRow[]
@@ -183,6 +249,12 @@ function readWeightingFile(starterFolder: string): { fileName: string; content: 
   throw new Error(errors[0] ?? 'Missing EndUses.txt or InpOneGroup.txt with trait and marker weightings')
 }
 
+function readMateselIni(starterFolder: string): { fileName: string; content: string } | null {
+  const fileName = findFileNameCaseInsensitive(starterFolder, 'Matesel.ini')
+  if (!fileName) return null
+  return { fileName, content: fs.readFileSync(path.join(starterFolder, fileName), 'utf8') }
+}
+
 export function inspectBatchStarter(starterFolder: string): BatchInspectResult {
   const warnings: string[] = []
   const files = fs.existsSync(starterFolder) ? listJobFolderFiles(starterFolder) : []
@@ -198,6 +270,19 @@ export function inspectBatchStarter(starterFolder: string): BatchInspectResult {
   let traits: BatchWeightingRow[] = []
   let markers: BatchWeightingRow[] = []
   let weightingFileName: string | undefined
+  let iniRows: BatchWeightingRow[] = []
+  let iniWarning: string | undefined
+
+  const iniFile = readMateselIni(starterFolder)
+  if (iniFile) {
+    try {
+      iniRows = toPublicRows(parseMateselHistogram(iniFile.content, iniFile.fileName).rows)
+    } catch (err: unknown) {
+      // Surface separately (shown in the Matesel.ini step) rather than as a
+      // blocking warning — a starter without the histogram is still usable.
+      iniWarning = err instanceof Error ? err.message : String(err)
+    }
+  }
 
   try {
     const weightingFile = readWeightingFile(starterFolder)
@@ -231,7 +316,9 @@ export function inspectBatchStarter(starterFolder: string): BatchInspectResult {
     endUseCount,
     traits,
     markers,
-    markerLocusCount
+    markerLocusCount,
+    iniRows,
+    iniWarning
   }
 }
 
@@ -280,9 +367,13 @@ function replaceColumn(line: string, column: NumericColumn, value: string): stri
   return `${line.slice(0, column.start)}${replacement}${line.slice(column.end)}`
 }
 
-function renderInpOneGroup(parsed: ParsedInpOneGroup, changes: RunChange[]): string {
+interface InpRunChange extends RunChange {
+  row: ParsedLineRow
+}
+
+function renderInpOneGroup(parsed: ParsedInpOneGroup, changes: InpRunChange[]): string {
   const lines = [...parsed.lines]
-  const changesByLine = new Map<number, RunChange[]>()
+  const changesByLine = new Map<number, InpRunChange[]>()
   for (const change of changes) {
     const existing = changesByLine.get(change.row.lineIndex) ?? []
     existing.push(change)
@@ -300,18 +391,43 @@ function renderInpOneGroup(parsed: ParsedInpOneGroup, changes: RunChange[]): str
   return lines.join(parsed.lineEnding)
 }
 
+function replaceIniWeighting(line: string, row: ParsedIniRow, value: string): string {
+  // Left-align the new value within the original Weighting field so every
+  // following column keeps its offset (and unchanged lines stay byte-identical).
+  const fieldWidth = row.nextColumnStart - row.column.start
+  const padded = value.length >= fieldWidth ? `${value} ` : value.padEnd(fieldWidth, ' ')
+  return `${line.slice(0, row.column.start)}${padded}${line.slice(row.nextColumnStart)}`
+}
+
+function renderMateselIni(parsed: ParsedMateselIni, changes: RunChange[]): string {
+  const lines = [...parsed.lines]
+  for (const change of changes) {
+    if (!isIniRow(change.row)) continue
+    lines[change.row.lineIndex] = replaceIniWeighting(
+      lines[change.row.lineIndex],
+      change.row,
+      change.generatedValue
+    )
+  }
+  return lines.join(parsed.lineEnding)
+}
+
 function renderBatchChanges(
   jobName: string,
   starterFolder: string,
   weightingFileName: string,
+  iniFileName: string,
   generatedAt: string,
   changes: RunChange[]
 ): string {
+  const changedFiles = Array.from(
+    new Set(changes.map((change) => (isIniRow(change.row) ? iniFileName : weightingFileName)))
+  )
   const lines = [
     `Job: ${jobName}`,
     'Batch weighting changes compared with starter defaults',
     `Starter folder: ${starterFolder}`,
-    `Changed file: ${weightingFileName}`,
+    `Changed files: ${changedFiles.join(', ')}`,
     `Generated at: ${generatedAt}`,
     '',
     'Item\tType\tEndUse\tDefault\tThis run'
@@ -353,13 +469,22 @@ export function generateBatchJobs(request: BatchGeneratePayload): BatchGenerateR
 
   const weightingFile = readWeightingFile(request.starterFolder)
   const parsed = parseInpOneGroupContent(weightingFile.content, weightingFile.fileName)
-  const rowMap = new Map<string, ParsedLineRow>()
-  for (const row of [...parsed.traits, ...parsed.markers]) rowMap.set(row.id, row)
 
-  const expanded: Array<ExpandedVariation & { row: ParsedLineRow }> = request.variations.map((spec) => {
+  const needsIni = request.variations.some((spec) => spec.rowId.startsWith('ini:'))
+  const iniFile = needsIni ? readMateselIni(request.starterFolder) : null
+  if (needsIni && !iniFile) throw new Error('Missing Matesel.ini')
+  const parsedIni = iniFile ? parseMateselHistogram(iniFile.content, iniFile.fileName) : null
+
+  const rowMap = new Map<string, ParsedRow>()
+  for (const row of [...parsed.traits, ...parsed.markers]) rowMap.set(row.id, row)
+  for (const row of parsedIni?.rows ?? []) rowMap.set(row.id, row)
+
+  const expanded: Array<ExpandedVariation & { row: ParsedRow }> = request.variations.map((spec) => {
     const row = rowMap.get(spec.rowId)
     if (!row) throw new Error(`Unknown weighting row: ${spec.rowId}`)
-    if (!Number.isInteger(spec.endUseIndex) || spec.endUseIndex < 0 || spec.endUseIndex >= parsed.endUseCount) {
+    if (isIniRow(row)) {
+      if (spec.endUseIndex !== 0) throw new Error(`Invalid EndUse index for ${row.name}`)
+    } else if (!Number.isInteger(spec.endUseIndex) || spec.endUseIndex < 0 || spec.endUseIndex >= parsed.endUseCount) {
       throw new Error(`Invalid EndUse index for ${row.name}`)
     }
     return { spec, values: expandBatchVariationValues(spec), row }
@@ -397,13 +522,26 @@ export function generateBatchJobs(request: BatchGeneratePayload): BatchGenerateR
       divisor *= variation.values.length
     }
 
+    const inpChanges = changes.filter((change): change is InpRunChange => !isIniRow(change.row))
+    const iniChanges = changes.filter((change) => isIniRow(change.row))
+
     const runName = paddedRunName(runIndex + 1, combinationCount)
     const runFolder = path.join(batchFolder, runName)
     fs.cpSync(request.starterFolder, runFolder, { recursive: true, force: true })
-    fs.writeFileSync(path.join(runFolder, parsed.fileName), renderInpOneGroup(parsed, changes))
+    fs.writeFileSync(path.join(runFolder, parsed.fileName), renderInpOneGroup(parsed, inpChanges))
+    if (parsedIni && iniChanges.length > 0) {
+      fs.writeFileSync(path.join(runFolder, parsedIni.fileName), renderMateselIni(parsedIni, iniChanges))
+    }
     fs.writeFileSync(
       path.join(runFolder, 'BatchChanges.txt'),
-      renderBatchChanges(runName, request.starterFolder, parsed.fileName, generatedAt, changes)
+      renderBatchChanges(
+        runName,
+        request.starterFolder,
+        parsed.fileName,
+        parsedIni?.fileName ?? 'Matesel.ini',
+        generatedAt,
+        changes
+      )
     )
     generatedFolders.push(runFolder)
   }

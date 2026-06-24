@@ -54,7 +54,7 @@ export interface AddJobResult {
   hasOutputFiles?: boolean
 }
 
-export type BatchWeightingKind = 'trait' | 'marker'
+export type BatchWeightingKind = 'trait' | 'marker' | 'ini'
 export type BatchValueMode = 'value' | 'range' | 'list'
 
 export interface BatchWeightingRow {
@@ -76,6 +76,8 @@ export interface BatchInspectResult {
   traits: BatchWeightingRow[]
   markers: BatchWeightingRow[]
   markerLocusCount: number
+  iniRows: BatchWeightingRow[]
+  iniWarning?: string
 }
 
 export interface BatchVariationSpec {

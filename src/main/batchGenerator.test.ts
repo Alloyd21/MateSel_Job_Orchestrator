@@ -7,7 +7,8 @@ import {
   generateBatchJobs,
   inspectBatchStarter,
   MAX_GENERATED_BATCH_RUNS,
-  parseInpOneGroup
+  parseInpOneGroup,
+  parseMateselHistogram
 } from './batchGenerator'
 
 let tempDir: string
@@ -53,6 +54,20 @@ const inpOneGroupWithTenMarkerRows = [
   ''
 ].join('\r\n')
 
+const mateselIni = [
+  'Integer parameters:',
+  ' 4                 , Balance Strategy',
+  'For a new job leave the rest of this file blank, after this line.',
+  ' 16                , Number of traits',
+  ' 6                 , Number of marker loci',
+  'Parameters to manipulate Inbreeding, Coancestry, Trait and Marker histograms ...',
+  'Item         Invoked     ControlType     Weighting        Target1       Target2    Target3',
+  'ProgInb        1             8             10            0.131162      0.131162      50 ',
+  'SireCoan       0             1             1             0.0741811     0.0741811     50 ',
+  'Polled22       0             1             1             0.0003447053                0.0003447053                50 ',
+  ''
+].join('\r\n')
+
 function writeFile(fileName: string, content = ''): void {
   fs.writeFileSync(path.join(tempDir, fileName), content)
 }
@@ -82,6 +97,26 @@ describe('parseInpOneGroup', () => {
 
   it('returns a clear error for missing sections', () => {
     expect(() => parseInpOneGroup('Number of EndUses\n2\n')).toThrow(/trait weighting section/)
+  })
+})
+
+describe('parseMateselHistogram', () => {
+  it('extracts Item names and Weighting values from the histogram table', () => {
+    const parsed = parseMateselHistogram(mateselIni)
+
+    expect(parsed.rows.map((row) => row.name)).toEqual(['ProgInb', 'SireCoan', 'Polled22'])
+    expect(parsed.rows.map((row) => row.values[0])).toEqual(['10', '1', '1'])
+    expect(parsed.rows.every((row) => row.kind === 'ini')).toBe(true)
+    // Weighting field offsets land on the third numeric column.
+    const progInb = parsed.rows[0]
+    const line = parsed.lines[progInb.lineIndex]
+    expect(line.slice(progInb.column.start, progInb.column.end)).toBe('10')
+  })
+
+  it('throws when the histogram header is missing', () => {
+    expect(() => parseMateselHistogram('Integer parameters:\r\n 4 , Balance Strategy\r\n')).toThrow(
+      /histogram table/
+    )
   })
 })
 
@@ -127,6 +162,30 @@ describe('inspectBatchStarter', () => {
 
     expect(inspection.markers).toHaveLength(10)
     expect(inspection.markerLocusCount).toBe(2)
+  })
+
+  it('exposes Matesel.ini histogram rows when present', () => {
+    writeFile('Matesel.ini', mateselIni)
+    writeFile('InpOneGroup.txt', inpOneGroup)
+    writeFile('DataFile.csv', 'ID,Sex\nA,F\n')
+
+    const inspection = inspectBatchStarter(tempDir)
+
+    expect(inspection.iniRows.map((row) => row.name)).toEqual(['ProgInb', 'SireCoan', 'Polled22'])
+    expect(inspection.iniWarning).toBeUndefined()
+    expect(inspection.valid).toBe(true)
+  })
+
+  it('does not block when Matesel.ini lacks the histogram table', () => {
+    writeFile('Matesel.ini', 'config')
+    writeFile('InpOneGroup.txt', inpOneGroup)
+    writeFile('DataFile.csv', 'ID,Sex\nA,F\n')
+
+    const inspection = inspectBatchStarter(tempDir)
+
+    expect(inspection.iniRows).toEqual([])
+    expect(inspection.iniWarning).toMatch(/histogram table/)
+    expect(inspection.valid).toBe(true)
   })
 })
 
@@ -197,10 +256,87 @@ describe('generateBatchJobs', () => {
 
       const changes = fs.readFileSync(path.join(firstRun, 'BatchChanges.txt'), 'utf8')
       expect(changes.split(/\r?\n/)[0]).toBe('Job: run_0001')
-      expect(changes).toContain('Changed file: InpOneGroup.txt')
+      expect(changes).toContain('Changed files: InpOneGroup.txt')
       expect(changes).toContain('Item\tType\tEndUse\tDefault\tThis run')
       expect(changes).toContain('WT_Birth\ttrait\t1\t0\t1')
       expect(changes).toContain('Polled genotype NN\tmarker\t2\t3\t9')
+    } finally {
+      fs.rmSync(destinationParent, { recursive: true, force: true })
+    }
+  })
+
+  it('edits only the requested Matesel.ini weighting and preserves the rest of the file', () => {
+    writeFile('Matesel.ini', mateselIni)
+    writeFile('InpOneGroup.txt', inpOneGroup)
+    writeFile('DataFile.csv', 'ID,Sex\nA,F\n')
+    const destinationParent = fs.mkdtempSync(path.join(os.tmpdir(), 'matesel-batch-dest-'))
+
+    try {
+      const inspection = inspectBatchStarter(tempDir)
+      const progInb = inspection.iniRows.find((row) => row.name === 'ProgInb')
+      expect(progInb).toBeDefined()
+
+      const result = generateBatchJobs({
+        starterFolder: tempDir,
+        destinationParent,
+        variations: [{ rowId: progInb!.id, endUseIndex: 0, mode: 'list', value: '5,25' }]
+      })
+
+      expect(result.generatedFolders).toHaveLength(2)
+      const sourceLines = mateselIni.split('\r\n')
+      const firstIni = fs.readFileSync(path.join(result.generatedFolders[0], 'Matesel.ini'), 'utf8').split('\r\n')
+      const secondIni = fs.readFileSync(path.join(result.generatedFolders[1], 'Matesel.ini'), 'utf8').split('\r\n')
+
+      // Only the Weighting column (Invoked=1, ControlType=8) changes; Targets stay aligned.
+      expect(firstIni[7]).toMatch(/^ProgInb\s+1\s+8\s+5\s+0\.131162\s+0\.131162\s+50\s*$/)
+      expect(secondIni[7]).toMatch(/^ProgInb\s+1\s+8\s+25\s+0\.131162\s+0\.131162\s+50\s*$/)
+      // Width is preserved so following columns keep their offsets.
+      expect(firstIni[7].length).toBe(sourceLines[7].length)
+      expect(secondIni[7].length).toBe(sourceLines[7].length)
+
+      // Every other line is byte-for-byte identical to the source.
+      sourceLines.forEach((line, index) => {
+        if (index === 7) return
+        expect(firstIni[index]).toBe(line)
+        expect(secondIni[index]).toBe(line)
+      })
+
+      const changes = fs.readFileSync(path.join(result.generatedFolders[0], 'BatchChanges.txt'), 'utf8')
+      expect(changes).toContain('Changed files: Matesel.ini')
+      expect(changes).toContain('ProgInb\tini\t1\t10\t5')
+    } finally {
+      fs.rmSync(destinationParent, { recursive: true, force: true })
+    }
+  })
+
+  it('combines Matesel.ini and EndUses variations as a cartesian product', () => {
+    writeFile('Matesel.ini', mateselIni)
+    writeFile('InpOneGroup.txt', inpOneGroup)
+    writeFile('DataFile.csv', 'ID,Sex\nA,F\n')
+    const destinationParent = fs.mkdtempSync(path.join(os.tmpdir(), 'matesel-batch-dest-'))
+
+    try {
+      const inspection = inspectBatchStarter(tempDir)
+      const progInb = inspection.iniRows.find((row) => row.name === 'ProgInb')!
+      const trait = inspection.traits.find((row) => row.name === 'WT_Birth')!
+
+      const result = generateBatchJobs({
+        starterFolder: tempDir,
+        destinationParent,
+        variations: [
+          { rowId: progInb.id, endUseIndex: 0, mode: 'list', value: '5,25' },
+          { rowId: trait.id, endUseIndex: 0, mode: 'list', value: '1,2,3' }
+        ]
+      })
+
+      expect(result.generatedFolders).toHaveLength(6)
+      const firstRun = result.generatedFolders[0]
+      expect(fs.readFileSync(path.join(firstRun, 'Matesel.ini'), 'utf8')).toMatch(
+        /ProgInb\s+1\s+8\s+5\s+0\.131162/
+      )
+      expect(fs.readFileSync(path.join(firstRun, 'InpOneGroup.txt'), 'utf8')).toContain(
+        '      1      0              WT_Birth'
+      )
     } finally {
       fs.rmSync(destinationParent, { recursive: true, force: true })
     }

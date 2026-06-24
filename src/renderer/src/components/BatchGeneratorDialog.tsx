@@ -18,6 +18,8 @@ interface VariationDraft {
   enabled: boolean
   mode: BatchValueMode
   value: string
+  rangeStart: string
+  rangeEnd: string
   increment: string
 }
 
@@ -37,7 +39,7 @@ function parseKey(key: string): { rowId: string; endUseIndex: number } {
 }
 
 function defaultDraft(value = ''): VariationDraft {
-  return { enabled: false, mode: 'value', value, increment: '1' }
+  return { enabled: false, mode: 'value', value, rangeStart: '', rangeEnd: '', increment: '1' }
 }
 
 function isOnlyDataFileWarning(inspection: BatchInspectResult): boolean {
@@ -59,6 +61,7 @@ export function BatchGeneratorDialog({ onClose }: BatchGeneratorDialogProps): JS
   const [batchTimestamp, setBatchTimestamp] = useState(makeBatchTimestamp())
   const [inspection, setInspection] = useState<BatchInspectResult | null>(null)
   const [selectedDataFileName, setSelectedDataFileName] = useState('')
+  const [step, setStep] = useState<'ini' | 'enduses'>('ini')
   const [activeRowId, setActiveRowId] = useState<string | null>(null)
   const [drafts, setDrafts] = useState<Record<string, VariationDraft>>({})
   const [allowLargeBatch, setAllowLargeBatch] = useState(false)
@@ -68,7 +71,7 @@ export function BatchGeneratorDialog({ onClose }: BatchGeneratorDialogProps): JS
 
   const rows = useMemo<BatchWeightingRow[]>(() => {
     if (!inspection) return []
-    return [...inspection.traits, ...inspection.markers]
+    return [...inspection.iniRows, ...inspection.traits, ...inspection.markers]
   }, [inspection])
 
   const rowMap = useMemo(() => new Map(rows.map((row) => [row.id, row])), [rows])
@@ -82,7 +85,7 @@ export function BatchGeneratorDialog({ onClose }: BatchGeneratorDialogProps): JS
         return {
           ...parsed,
           mode: draft.mode,
-          value: draft.value,
+          value: draft.mode === 'range' ? `${draft.rangeStart}-${draft.rangeEnd}` : draft.value,
           increment: draft.mode === 'range' ? draft.increment : undefined
         }
       })
@@ -127,6 +130,7 @@ export function BatchGeneratorDialog({ onClose }: BatchGeneratorDialogProps): JS
     setBatchTimestamp(makeBatchTimestamp())
     setInspection(null)
     setSelectedDataFileName('')
+    setStep('ini')
     setDrafts({})
     setActiveRowId(null)
     setResult(null)
@@ -204,6 +208,101 @@ export function BatchGeneratorDialog({ onClose }: BatchGeneratorDialogProps): JS
     } finally {
       setLoading(false)
     }
+  }
+
+  const kindLabel = (kind: BatchWeightingRow['kind']): string =>
+    kind === 'ini' ? 'Matesel.ini weighting' : kind === 'trait' ? 'Trait weighting' : 'Marker weighting'
+
+  const renderRowCards = (row: BatchWeightingRow): JSX.Element => {
+    const isIni = row.kind === 'ini'
+    const indices = isIni
+      ? [0]
+      : Array.from({ length: inspection?.endUseCount ?? 0 }, (_, index) => index)
+    return (
+      <div className="flex flex-col gap-4">
+        <div>
+          <div className="text-sm font-semibold text-slate-100">{row.name}</div>
+          <div className="text-xs text-slate-500">{kindLabel(row.kind)}</div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          {indices.map((index) => {
+            const key = keyFor(row.id, index)
+            const draft = drafts[key] ?? defaultDraft(row.values[index] ?? '')
+            return (
+              <div key={key} className="rounded border border-slate-700 bg-slate-950 p-3">
+                <label className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold text-slate-200">
+                    {isIni ? 'Weighting' : `EndUse ${index + 1}`}
+                  </span>
+                  <span className="font-mono text-[11px] text-slate-500">default {row.values[index]}</span>
+                  <input
+                    type="checkbox"
+                    checked={draft.enabled}
+                    onChange={(event) => updateDraft(row, index, { enabled: event.target.checked })}
+                    className="h-3.5 w-3.5"
+                  />
+                </label>
+
+                <div className="mt-3 grid grid-cols-[120px_1fr] gap-2">
+                  <select
+                    value={draft.mode}
+                    onChange={(event) => updateDraft(row, index, { mode: event.target.value as BatchValueMode })}
+                    disabled={!draft.enabled}
+                    className="rounded border border-slate-600 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 disabled:opacity-40"
+                  >
+                    {(Object.keys(modeLabels) as BatchValueMode[]).map((mode) => (
+                      <option key={mode} value={mode}>
+                        {modeLabels[mode]}
+                      </option>
+                    ))}
+                  </select>
+                  {draft.mode === 'range' ? (
+                    <div className="flex min-w-0 items-center gap-2">
+                      <input
+                        value={draft.rangeStart}
+                        onChange={(event) => updateDraft(row, index, { rangeStart: event.target.value })}
+                        disabled={!draft.enabled}
+                        placeholder="start"
+                        className="min-w-0 flex-1 rounded border border-slate-600 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 disabled:opacity-40"
+                      />
+                      <span className="shrink-0 text-xs text-slate-500">to</span>
+                      <input
+                        value={draft.rangeEnd}
+                        onChange={(event) => updateDraft(row, index, { rangeEnd: event.target.value })}
+                        disabled={!draft.enabled}
+                        placeholder="end"
+                        className="min-w-0 flex-1 rounded border border-slate-600 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 disabled:opacity-40"
+                      />
+                    </div>
+                  ) : (
+                    <input
+                      value={draft.value}
+                      onChange={(event) => updateDraft(row, index, { value: event.target.value })}
+                      disabled={!draft.enabled}
+                      placeholder={draft.mode === 'list' ? '1,4,7,98' : '1'}
+                      className="min-w-0 rounded border border-slate-600 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 disabled:opacity-40"
+                    />
+                  )}
+                  {draft.mode === 'range' && (
+                    <>
+                      <span className="self-center text-xs text-slate-500">Increment</span>
+                      <input
+                        value={draft.increment}
+                        onChange={(event) => updateDraft(row, index, { increment: event.target.value })}
+                        disabled={!draft.enabled}
+                        placeholder="0.1"
+                        className="min-w-0 rounded border border-slate-600 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 disabled:opacity-40"
+                      />
+                    </>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    )
   }
 
   const renderRowList = (title: string, sectionRows: BatchWeightingRow[]): JSX.Element => (
@@ -333,7 +432,33 @@ export function BatchGeneratorDialog({ onClose }: BatchGeneratorDialogProps): JS
             </div>
           )}
 
-          {inspection && (
+          {inspection && step === 'ini' && (
+            <div className="grid min-h-0 flex-1 grid-cols-[minmax(280px,380px)_1fr] gap-4">
+                <div className="flex min-h-0 flex-col gap-4 overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 p-3">
+                  {inspection.iniWarning ? (
+                    <div className="rounded border border-amber-700 bg-amber-950/40 p-2 text-xs text-amber-100">
+                      {inspection.iniWarning}
+                    </div>
+                  ) : inspection.iniRows.length === 0 ? (
+                    <div className="text-xs text-slate-500">No Matesel.ini histogram weightings found</div>
+                  ) : (
+                    renderRowList('Matesel.ini', inspection.iniRows)
+                  )}
+                </div>
+
+                <div className="min-h-0 overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 p-4">
+                  {activeRow && activeRow.kind === 'ini' ? (
+                    renderRowCards(activeRow)
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-sm text-slate-500">
+                      Select an item to edit its weighting
+                    </div>
+                  )}
+                </div>
+            </div>
+          )}
+
+          {inspection && step === 'enduses' && (
             <div className="grid min-h-0 flex-1 grid-cols-[minmax(280px,380px)_1fr] gap-4">
                 <div className="flex min-h-0 flex-col gap-4 overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 p-3">
                   {renderRowList('Traits', inspection.traits)}
@@ -341,74 +466,8 @@ export function BatchGeneratorDialog({ onClose }: BatchGeneratorDialogProps): JS
                 </div>
 
                 <div className="min-h-0 overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 p-4">
-                  {activeRow ? (
-                    <div className="flex flex-col gap-4">
-                      <div>
-                        <div className="text-sm font-semibold text-slate-100">{activeRow.name}</div>
-                        <div className="text-xs text-slate-500">
-                          {activeRow.kind === 'trait' ? 'Trait weighting' : 'Marker weighting'}
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-                        {Array.from({ length: inspection.endUseCount }, (_, index) => {
-                          const key = keyFor(activeRow.id, index)
-                          const draft = drafts[key] ?? defaultDraft(activeRow.values[index] ?? '')
-                          return (
-                            <div key={key} className="rounded border border-slate-700 bg-slate-950 p-3">
-                              <label className="flex items-center justify-between gap-2">
-                                <span className="text-xs font-semibold text-slate-200">EndUse {index + 1}</span>
-                                <span className="font-mono text-[11px] text-slate-500">
-                                  default {activeRow.values[index]}
-                                </span>
-                                <input
-                                  type="checkbox"
-                                  checked={draft.enabled}
-                                  onChange={(event) => updateDraft(activeRow, index, { enabled: event.target.checked })}
-                                  className="h-3.5 w-3.5"
-                                />
-                              </label>
-
-                              <div className="mt-3 grid grid-cols-[120px_1fr] gap-2">
-                                <select
-                                  value={draft.mode}
-                                  onChange={(event) =>
-                                    updateDraft(activeRow, index, { mode: event.target.value as BatchValueMode })
-                                  }
-                                  disabled={!draft.enabled}
-                                  className="rounded border border-slate-600 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 disabled:opacity-40"
-                                >
-                                  {(Object.keys(modeLabels) as BatchValueMode[]).map((mode) => (
-                                    <option key={mode} value={mode}>
-                                      {modeLabels[mode]}
-                                    </option>
-                                  ))}
-                                </select>
-                                <input
-                                  value={draft.value}
-                                  onChange={(event) => updateDraft(activeRow, index, { value: event.target.value })}
-                                  disabled={!draft.enabled}
-                                  placeholder={draft.mode === 'list' ? '1,4,7,98' : draft.mode === 'range' ? '1-4' : '1'}
-                                  className="min-w-0 rounded border border-slate-600 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 disabled:opacity-40"
-                                />
-                                {draft.mode === 'range' && (
-                                  <>
-                                    <span className="self-center text-xs text-slate-500">Increment</span>
-                                    <input
-                                      value={draft.increment}
-                                      onChange={(event) => updateDraft(activeRow, index, { increment: event.target.value })}
-                                      disabled={!draft.enabled}
-                                      placeholder="0.1"
-                                      className="min-w-0 rounded border border-slate-600 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 disabled:opacity-40"
-                                    />
-                                  </>
-                                )}
-                              </div>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    </div>
+                  {activeRow && activeRow.kind !== 'ini' ? (
+                    renderRowCards(activeRow)
                   ) : (
                     <div className="flex h-full items-center justify-center text-sm text-slate-500">
                       Select a trait or marker to edit EndUse values
@@ -469,13 +528,32 @@ export function BatchGeneratorDialog({ onClose }: BatchGeneratorDialogProps): JS
             >
               Cancel
             </button>
-            <button
-              onClick={handleGenerate}
-              disabled={!canGenerate}
-              className="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-40"
-            >
-              {loading ? 'Working...' : 'Generate'}
-            </button>
+            {inspection && step === 'enduses' && (
+              <button
+                onClick={() => setStep('ini')}
+                disabled={loading}
+                className="rounded bg-slate-700 px-4 py-1.5 text-sm text-slate-200 hover:bg-slate-600 disabled:opacity-40"
+              >
+                ← Back
+              </button>
+            )}
+            {inspection && step === 'ini' ? (
+              <button
+                onClick={() => setStep('enduses')}
+                disabled={!hasUsableStarter}
+                className="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-40"
+              >
+                Next →
+              </button>
+            ) : (
+              <button
+                onClick={handleGenerate}
+                disabled={!canGenerate}
+                className="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-40"
+              >
+                {loading ? 'Working...' : 'Generate'}
+              </button>
+            )}
           </div>
         </div>
       </div>

@@ -216,7 +216,7 @@ export default function App(): JSX.Element {
             onStartAll={handleStartAll}
             onStopAll={handleStopAll}
             bulkAction={bulkAction}
-            onClearCompleted={handleClearCompleted}
+            onClearCompleted={() => handleClearCompleted()}
             onClearAll={() => handleClearCompleted(true)}
             onAddJobs={() => setShowAddJobs(true)}
           />
