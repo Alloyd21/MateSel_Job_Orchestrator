@@ -47,6 +47,16 @@ const fatalOutputPatterns = [
   /\bstopping\./i
 ]
 
+// MateSel prints this once the optimisation finishes and it begins writing
+// output files. The live path relies on the process exit code, but the reattach
+// path has no exit code, so it uses this marker to tell a completed run from a
+// crashed one.
+const successOutputPatterns = [/main run completed/i]
+
+function hasSuccessfulMateSelOutput(text: string): boolean {
+  return successOutputPatterns.some((pattern) => pattern.test(text))
+}
+
 interface IterationState {
   inOptimization: boolean
   currentGen: number
@@ -489,14 +499,19 @@ export function reattachToRunningJob(
 
     const consoleOutput = readConsoleLog(outputDir) || readConsoleLog(exeDir)
     const hasFatalOutput = hasFatalMateSelOutput(consoleOutput)
-    const status: 'failed' = 'failed'
-    const exitCode = -1
+    const completedSuccessfully = !hasFatalOutput && hasSuccessfulMateSelOutput(consoleOutput)
+    const status: 'done' | 'failed' = completedSuccessfully ? 'done' : 'failed'
+    const exitCode = completedSuccessfully ? 0 : -1
 
     if (hasFatalOutput) {
       onLog('[Orchestrator] MateSel reported a fatal error.\n')
+    } else if (completedSuccessfully) {
+      onLog(
+        '[Orchestrator] Reattached MateSel process completed (detected "Main run completed" in Console.txt). Marking this job done.\n'
+      )
     } else {
       onLog(
-        '[Orchestrator] Reattached MateSel process exited, but the original exit code is unavailable. Marking this job failed; review Console.txt and output files before treating it as complete.\n'
+        '[Orchestrator] Reattached MateSel process exited, but the original exit code is unavailable and no completion marker was found. Marking this job failed; review Console.txt and output files before treating it as complete.\n'
       )
     }
     try {

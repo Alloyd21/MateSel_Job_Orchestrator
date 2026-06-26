@@ -1,6 +1,6 @@
 {
   "name": "matesel-job-orchestrator",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Orchestrator for MateSel batch jobs",
   "main": "./out/main/index.js",
   "author": "Adam Lloyd",
