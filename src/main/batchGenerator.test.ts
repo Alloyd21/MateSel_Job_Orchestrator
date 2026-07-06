@@ -260,6 +260,18 @@ describe('generateBatchJobs', () => {
       expect(changes).toContain('Item\tType\tEndUse\tDefault\tThis run')
       expect(changes).toContain('WT_Birth\ttrait\t1\t0\t1')
       expect(changes).toContain('Polled genotype NN\tmarker\t2\t3\t9')
+
+      const batchDetails = fs.readFileSync(path.join(result.batchFolder, 'BatchDetails.txt'), 'utf8')
+      expect(batchDetails).toContain('Batch generation details')
+      expect(batchDetails).toContain('Runs: 2')
+      expect(batchDetails).toContain('Item\tType\tEndUse\tDefault\tMode\tValue\tIncrement\tExpanded values')
+      expect(batchDetails).toContain('WT_Birth\ttrait\t1\t0\tlist\t1,2\t\t1, 2')
+      expect(batchDetails).toContain('Polled genotype NN\tmarker\t2\t3\tvalue\t9\t\t9')
+
+      const runDetails = fs.readFileSync(path.join(firstRun, 'BatchDetails.txt'), 'utf8')
+      expect(runDetails).toContain('Job: run_0001')
+      expect(runDetails).toContain('WT_Birth\ttrait\t1\t0\t1')
+      expect(runDetails).toContain('Polled genotype NN\tmarker\t2\t3\t9')
     } finally {
       fs.rmSync(destinationParent, { recursive: true, force: true })
     }

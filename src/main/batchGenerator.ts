@@ -442,6 +442,48 @@ function renderBatchChanges(
   return `${lines.join('\r\n')}\r\n`
 }
 
+function renderBatchDetails(
+  batchFolder: string,
+  starterFolder: string,
+  weightingFileName: string,
+  iniFileName: string,
+  generatedAt: string,
+  combinationCount: number,
+  variations: Array<ExpandedVariation & { row: ParsedRow }>
+): string {
+  const changedFiles = Array.from(
+    new Set(variations.map((variation) => (isIniRow(variation.row) ? iniFileName : weightingFileName)))
+  )
+  const lines = [
+    `Batch: ${path.basename(batchFolder)}`,
+    'Batch generation details',
+    `Starter folder: ${starterFolder}`,
+    `Changed files: ${changedFiles.join(', ')}`,
+    `Generated at: ${generatedAt}`,
+    `Runs: ${combinationCount}`,
+    '',
+    'Item\tType\tEndUse\tDefault\tMode\tValue\tIncrement\tExpanded values'
+  ]
+
+  for (const variation of variations) {
+    const { spec, row } = variation
+    lines.push(
+      [
+        row.name,
+        row.kind,
+        spec.endUseIndex + 1,
+        row.values[spec.endUseIndex],
+        spec.mode,
+        spec.value,
+        spec.increment ?? '',
+        variation.values.join(', ')
+      ].join('\t')
+    )
+  }
+
+  return `${lines.join('\r\n')}\r\n`
+}
+
 function getCombinationCount(expanded: ExpandedVariation[]): number {
   return expanded.reduce((total, variation) => total * variation.values.length, 1)
 }
@@ -506,6 +548,18 @@ export function generateBatchJobs(request: BatchGeneratePayload): BatchGenerateR
   )
   const generatedFolders: string[] = []
   const generatedAt = new Date().toISOString()
+  fs.writeFileSync(
+    path.join(batchFolder, 'BatchDetails.txt'),
+    renderBatchDetails(
+      batchFolder,
+      request.starterFolder,
+      parsed.fileName,
+      parsedIni?.fileName ?? 'Matesel.ini',
+      generatedAt,
+      combinationCount,
+      expanded
+    )
+  )
 
   for (let runIndex = 0; runIndex < combinationCount; runIndex += 1) {
     const changes: RunChange[] = []
@@ -534,6 +588,17 @@ export function generateBatchJobs(request: BatchGeneratePayload): BatchGenerateR
     }
     fs.writeFileSync(
       path.join(runFolder, 'BatchChanges.txt'),
+      renderBatchChanges(
+        runName,
+        request.starterFolder,
+        parsed.fileName,
+        parsedIni?.fileName ?? 'Matesel.ini',
+        generatedAt,
+        changes
+      )
+    )
+    fs.writeFileSync(
+      path.join(runFolder, 'BatchDetails.txt'),
       renderBatchChanges(
         runName,
         request.starterFolder,

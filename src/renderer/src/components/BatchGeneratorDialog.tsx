@@ -43,6 +43,12 @@ function defaultDraft(value = ''): VariationDraft {
   return { enabled: false, mode: 'value', value, rangeStart: '', rangeEnd: '', increment: '1' }
 }
 
+function draftDisplayValue(draft: VariationDraft | undefined, defaultValue: string): string {
+  if (!draft?.enabled) return defaultValue
+  const value = draft.mode === 'range' ? `${draft.rangeStart}-${draft.rangeEnd}` : draft.value.trim()
+  return value && value !== defaultValue ? value : defaultValue
+}
+
 function isOnlyDataFileWarning(inspection: BatchInspectResult): boolean {
   return (
     inspection.needsDataFile &&
@@ -313,6 +319,10 @@ export function BatchGeneratorDialog({ onClose, onGenerated }: BatchGeneratorDia
       <div className="flex flex-col gap-1">
         {sectionRows.map((row) => {
           const enabled = isRowEnabled(row)
+          const values = row.values.map((value, index) => {
+            const displayValue = draftDisplayValue(drafts[keyFor(row.id, index)], value)
+            return { displayValue, changed: displayValue !== value }
+          })
           return (
             <button
               key={row.id}
@@ -335,8 +345,13 @@ export function BatchGeneratorDialog({ onClose, onGenerated }: BatchGeneratorDia
                 className="h-3.5 w-3.5 shrink-0"
               />
               <span className="min-w-0 flex-1 truncate">{row.name}</span>
-              <span className="shrink-0 font-mono text-[10px] text-slate-500">
-                {row.values.join(', ')}
+              <span className="shrink-0 truncate font-mono text-[10px] text-slate-500">
+                {values.map((value, index) => (
+                  <span key={index} className={value.changed ? 'text-blue-300' : undefined}>
+                    {index > 0 ? ', ' : ''}
+                    {value.displayValue}
+                  </span>
+                ))}
               </span>
             </button>
           )
