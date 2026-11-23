@@ -157,7 +157,8 @@ function sendLogChunk(jobId: string, text: string): void {
 
 export function enqueue(jobFolder: string, dataFileName?: string): void {
   if (!win) return
-  const name = path.basename(jobFolder)
+  const folderName = path.basename(jobFolder)
+  const name = folderName.toLowerCase() === 'commandline' ? path.basename(path.dirname(jobFolder)) : folderName
   const resolvedDataFileName = dataFileName ?? resolveDataFileName(jobFolder)
   const job: QueuedJob = {
     id: randomUUID(),

@@ -215,14 +215,14 @@ describe('validateJobFolder', () => {
 
     expect(validateJobFolder(tempDir)).toEqual({
       valid: false,
-      warnings: ['No Matesel.txt, MateselClassicDemo.txt, DataFile*.txt, or DataFile*.csv found'],
+      warnings: ['No Matesel.txt, MateselClassicDemo.txt, DataFile*.txt, DataFile*.csv, or MateSel.csv found'],
       needsDataFile: true,
       files: ['Matesel.ini', 'UnexpectedInput.csv']
     })
   })
 
   it('accepts a configured folder with recognised data and reports optional support-file warnings', () => {
-    writeFile('Matesel.ini')
+    writeFile('Matesel.ini', ' 2 , Switch to control Multiple EndUses (0=no, 1=original format)')
     writeFile('DataFile.csv')
 
     expect(validateJobFolder(tempDir)).toEqual({
@@ -287,6 +287,22 @@ describe('readBatchChanges', () => {
 })
 
 describe('discoverJobFolders', () => {
+  it('discovers an exported standard run and prepares its CSV without requiring EndUses.txt', () => {
+    const project = path.join(tempDir, '8_MOET_4')
+    const run = path.join(project, 'commandline')
+    writeFileIn(project, 'DataFile.csv')
+    writeFileIn(run, 'MateSel.ini', ' 0 , Switch to control Multiple EndUses (0=no, 1=original format)')
+    writeFileIn(run, 'inpOneGroup.txt')
+    writeFileIn(run, 'MateSel.csv', 'Id,Sex,g_marker,gp_marker,Trait\nA1,F,NaN,nan,2\n')
+    writeFileIn(run, 'Matesel.txt', 'stale input')
+
+    expect(discoverJobFolders([project])).toEqual([run])
+    expect(validateJobFolder(run)).toEqual({ valid: true, warnings: [] })
+    expect(findMateSelDataFileName(run)).toBe('MateSel.csv')
+    expect(prepareMateSelDataFile(run)).toBe('Matesel.txt')
+    expect(fs.readFileSync(path.join(run, 'Matesel.txt'), 'utf8')).toBe('Id Sex g_marker gp_marker Trait\r\nA1 F 0 0 2\r\n')
+  })
+
   it('finds nested folders containing Matesel.ini and returns them sorted', () => {
     const runB = path.join(tempDir, 'parent', 'RunB')
     const runA = path.join(tempDir, 'parent', 'RunA')

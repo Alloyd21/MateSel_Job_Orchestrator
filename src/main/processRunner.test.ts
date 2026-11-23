@@ -1,8 +1,11 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { ChildProcess, spawn } from 'child_process'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createStageTextHandler, reattachToRunningJob } from './processRunner'
+import { createStageTextHandler, prepareAndStart, reattachToRunningJob } from './processRunner'
+
+vi.mock('child_process', { spy: true })
 
 let tempDir: string
 
@@ -32,6 +35,33 @@ afterEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
   fs.rmSync(tempDir, { recursive: true, force: true })
+})
+
+it('fails a run when MateSel reports an expired token and exits with code zero', () => {
+  const child = new ChildProcess()
+  vi.mocked(spawn).mockReturnValueOnce(child)
+  fs.writeFileSync(path.join(tempDir, 'RunToken.txt'), '')
+  fs.writeFileSync(path.join(tempDir, 'Matesel.txt'), '')
+  const onComplete = vi.fn()
+  const onStatus = vi.fn()
+
+  prepareAndStart(
+    {} as Parameters<typeof prepareAndStart>[0],
+    tempDir,
+    tempDir,
+    'job-auth',
+    path.join(tempDir, 'MateSelBatch.exe'),
+    undefined,
+    false,
+    onComplete,
+    onStatus,
+    vi.fn()
+  )
+  writeConsole('Engine authentication failed. The token is expired.\r\n')
+  child.emit('close', 0)
+
+  expect(onComplete).toHaveBeenCalledWith('job-auth', 'failed', 0)
+  expect(onStatus).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'failed' }))
 })
 
 describe('reattachToRunningJob', () => {

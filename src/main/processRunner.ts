@@ -41,7 +41,9 @@ function applyPerformanceTuning(
 
 const fatalOutputPatterns = [
   /could not find token file/i,
+  /engine authentication failed/i,
   /engine authentication inputs are invalid/i,
+  /unable to reach license server/i,
   /forrtl:\s+severe/i,
   /access violation/i,
   /\bstopping\./i

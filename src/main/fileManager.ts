@@ -44,6 +44,8 @@ export function readBatchChanges(folderPath: string): BatchChangeRow[] {
     }))
 }
 
+const mateSelDataFileChoices = 'Matesel.txt, MateselClassicDemo.txt, DataFile*.txt, DataFile*.csv, or MateSel.csv'
+
 export function findMateSelDataFileName(folderPath: string): string | undefined {
   const files = fs.readdirSync(folderPath)
 
@@ -62,6 +64,9 @@ export function findMateSelDataFileName(folderPath: string): string | undefined 
   // from a previous run shadowing edited data.
   const dataFileCsv = files.find((fileName) => /^DataFile.*\.csv$/i.test(fileName))
   if (dataFileCsv) return dataFileCsv
+
+  const exportedCsv = files.find((fileName) => fileName.toLowerCase() === 'matesel.csv')
+  if (exportedCsv) return exportedCsv
 
   return files.find((fileName) => fileName.toLowerCase() === 'matesel.txt')
 }
@@ -84,7 +89,7 @@ function normalizeMateSelValue(header: string, value: string): string {
   }
 
   if (header === 'Sex' && trimmed.toUpperCase() === 'U') return '0'
-  if (isMarker && trimmed.toUpperCase() === 'U') return '0'
+  if (isMarker && /^(?:u|nan)$/i.test(trimmed)) return '0'
 
   return formatNumeric(trimmed)
 }
@@ -162,7 +167,7 @@ export function prepareMateSelDataFile(
 ): string {
   const dataFileName = selectedDataFileName ?? findMateSelDataFileName(outputDir)
   if (!dataFileName) {
-    throw new Error(`No Matesel.txt, MateselClassicDemo.txt, DataFile*.txt, or DataFile*.csv found in ${outputDir}`)
+    throw new Error(`No ${mateSelDataFileChoices} found in ${outputDir}`)
   }
 
   const sourcePath = path.join(outputDir, dataFileName)
@@ -187,14 +192,6 @@ export function prepareMateSelDataFile(
   fs.writeFileSync(path.join(outputDir, destinationName), `${normalizedLines.join('\r\n')}\r\n`)
   onLog?.(`[Orchestrator] ${destinationName} re-generated from ${dataFileName}\n`)
   return destinationName
-}
-
-function hasMateSelConfig(folderPath: string): boolean {
-  try {
-    return fs.readdirSync(folderPath).some((fileName) => fileName.toLowerCase() === 'matesel.ini')
-  } catch {
-    return false
-  }
 }
 
 export function discoverJobFolders(folderPaths: string[]): string[] {
@@ -229,22 +226,25 @@ export function validateJobFolder(
   folderPath: string
 ): { valid: boolean; warnings: string[]; needsDataFile?: boolean; files?: string[] } {
   const warnings: string[] = []
-  const files = fs.readdirSync(folderPath)
-
-  if (!hasMateSelConfig(folderPath)) {
+  const configFileName = findFileNameCaseInsensitive(folderPath, 'Matesel.ini')
+  if (!configFileName) {
     return { valid: false, warnings: ['Missing Matesel.ini'] }
   }
 
   if (!findMateSelDataFileName(folderPath)) {
     return {
       valid: false,
-      warnings: ['No Matesel.txt, MateselClassicDemo.txt, DataFile*.txt, or DataFile*.csv found'],
+      warnings: [`No ${mateSelDataFileChoices} found`],
       needsDataFile: true,
       files: listJobFolderFiles(folderPath)
     }
   }
-  if (!files.includes('EndUses.txt')) warnings.push('Missing EndUses.txt')
-  if (!files.includes('InpOneGroup.txt')) warnings.push('Missing InpOneGroup.txt')
+  const config = fs.readFileSync(path.join(folderPath, configFileName), 'utf8')
+  const endUseMode = config.match(/^\s*(\d+)\s*,\s*Switch to control Multiple EndUses\b/im)
+  if (endUseMode && Number(endUseMode[1]) > 0 && !findFileNameCaseInsensitive(folderPath, 'EndUses.txt')) {
+    warnings.push('Missing EndUses.txt')
+  }
+  if (!findFileNameCaseInsensitive(folderPath, 'InpOneGroup.txt')) warnings.push('Missing InpOneGroup.txt')
 
   return { valid: true, warnings }
 }
