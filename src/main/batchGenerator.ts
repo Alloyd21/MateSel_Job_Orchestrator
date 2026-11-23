@@ -11,7 +11,7 @@ import {
   type BatchWeightingKind,
   type BatchWeightingRow
 } from '../shared'
-import { findFileNameCaseInsensitive, findMateSelDataFileName, listJobFolderFiles } from './fileManager'
+import { findFileNameCaseInsensitive, findMateSelDataFileName, listJobFolderFiles, readMateSelEndUseMode } from './fileManager'
 
 interface NumericColumn {
   start: number
@@ -229,7 +229,7 @@ export function parseInpOneGroup(content: string): {
   }
 }
 
-function readWeightingFile(starterFolder: string): { fileName: string; content: string } {
+function readEndUseWeightings(starterFolder: string): ParsedInpOneGroup {
   const candidateNames = ['EndUses.txt', 'InpOneGroup.txt']
   const errors: string[] = []
 
@@ -239,8 +239,7 @@ function readWeightingFile(starterFolder: string): { fileName: string; content: 
 
     const content = fs.readFileSync(path.join(starterFolder, fileName), 'utf8')
     try {
-      parseInpOneGroupContent(content, fileName)
-      return { fileName, content }
+      return parseInpOneGroupContent(content, fileName)
     } catch (err: unknown) {
       errors.push(err instanceof Error ? err.message : String(err))
     }
@@ -255,13 +254,26 @@ function readMateselIni(starterFolder: string): { fileName: string; content: str
   return { fileName, content: fs.readFileSync(path.join(starterFolder, fileName), 'utf8') }
 }
 
+function resolveBatchStarterFolder(folder: string): string {
+  if (findFileNameCaseInsensitive(folder, 'Matesel.ini')) return folder
+
+  const commandline = findFileNameCaseInsensitive(folder, 'commandline')
+  if (!commandline) return folder
+
+  const exportFolder = path.join(folder, commandline)
+  return findFileNameCaseInsensitive(exportFolder, 'Matesel.ini') ? exportFolder : folder
+}
+
 export function inspectBatchStarter(starterFolder: string): BatchInspectResult {
+  starterFolder = resolveBatchStarterFolder(starterFolder)
   const warnings: string[] = []
+  const iniFile = readMateselIni(starterFolder)
+  const standardRun = iniFile != null && readMateSelEndUseMode(iniFile.content) === 0
   const files = fs.existsSync(starterFolder) ? listJobFolderFiles(starterFolder) : []
   const dataFileName = fs.existsSync(starterFolder) ? findMateSelDataFileName(starterFolder) : undefined
 
   if (!fs.existsSync(starterFolder)) warnings.push('Starter folder does not exist')
-  if (!findFileNameCaseInsensitive(starterFolder, 'Matesel.ini')) warnings.push('Missing Matesel.ini')
+  if (!iniFile) warnings.push('Missing Matesel.ini')
 
   const needsDataFile = !dataFileName
   if (needsDataFile) warnings.push('No recognised MateSel data file found')
@@ -273,38 +285,30 @@ export function inspectBatchStarter(starterFolder: string): BatchInspectResult {
   let iniRows: BatchWeightingRow[] = []
   let iniWarning: string | undefined
 
-  const iniFile = readMateselIni(starterFolder)
   if (iniFile) {
     try {
       iniRows = toPublicRows(parseMateselHistogram(iniFile.content, iniFile.fileName).rows)
     } catch (err: unknown) {
-      // Surface separately (shown in the Matesel.ini step) rather than as a
-      // blocking warning — a starter without the histogram is still usable.
-      iniWarning = err instanceof Error ? err.message : String(err)
+      const message = err instanceof Error ? err.message : String(err)
+      if (standardRun) warnings.push(message)
+      else iniWarning = message
     }
   }
 
-  try {
-    const weightingFile = readWeightingFile(starterFolder)
-    const parsed = parseInpOneGroupContent(weightingFile.content, weightingFile.fileName)
-    weightingFileName = weightingFile.fileName
-    endUseCount = parsed.endUseCount
-    traits = toPublicRows(parsed.traits)
-    markers = toPublicRows(parsed.markers)
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err)
-    warnings.push(message)
+  if (!standardRun) {
+    try {
+      const parsed = readEndUseWeightings(starterFolder)
+      weightingFileName = parsed.fileName
+      endUseCount = parsed.endUseCount
+      traits = toPublicRows(parsed.traits)
+      markers = toPublicRows(parsed.markers)
+    } catch (err: unknown) {
+      warnings.push(err instanceof Error ? err.message : String(err))
+    }
   }
 
   const markerLocusCount = deriveMarkerLocusCount(markers.length)
-  const valid =
-    fs.existsSync(starterFolder) &&
-    Boolean(findFileNameCaseInsensitive(starterFolder, 'Matesel.ini')) &&
-    Boolean(weightingFileName) &&
-    endUseCount > 0 &&
-    traits.length > 0 &&
-    markers.length > 0 &&
-    !needsDataFile
+  const valid = warnings.length === 0
 
   return {
     valid,
@@ -415,7 +419,7 @@ function renderMateselIni(parsed: ParsedMateselIni, changes: RunChange[]): strin
 function renderBatchChanges(
   jobName: string,
   starterFolder: string,
-  weightingFileName: string,
+  weightingFileName: string | undefined,
   iniFileName: string,
   generatedAt: string,
   changes: RunChange[]
@@ -435,7 +439,7 @@ function renderBatchChanges(
 
   for (const change of changes) {
     lines.push(
-      `${change.row.name}\t${change.row.kind}\t${change.endUseIndex + 1}\t${change.defaultValue}\t${change.generatedValue}`
+      `${change.row.name}\t${change.row.kind}\t${weightingFileName ? change.endUseIndex + 1 : ''}\t${change.defaultValue}\t${change.generatedValue}`
     )
   }
 
@@ -445,7 +449,7 @@ function renderBatchChanges(
 function renderBatchDetails(
   batchFolder: string,
   starterFolder: string,
-  weightingFileName: string,
+  weightingFileName: string | undefined,
   iniFileName: string,
   generatedAt: string,
   combinationCount: number,
@@ -471,7 +475,7 @@ function renderBatchDetails(
       [
         row.name,
         row.kind,
-        spec.endUseIndex + 1,
+        weightingFileName ? spec.endUseIndex + 1 : '',
         row.values[spec.endUseIndex],
         spec.mode,
         spec.value,
@@ -502,23 +506,24 @@ export function generateBatchJobs(request: BatchGeneratePayload): BatchGenerateR
   if (!fs.existsSync(request.destinationParent)) throw new Error('Destination parent does not exist')
   ensureDestinationParentAllowed(request.starterFolder, request.destinationParent)
 
-  const dataFileName = request.selectedDataFileName ?? findMateSelDataFileName(request.starterFolder)
+  const starterFolder = resolveBatchStarterFolder(request.starterFolder)
+  const dataFileName = request.selectedDataFileName ?? findMateSelDataFileName(starterFolder)
   if (!dataFileName) throw new Error('No MateSel data file was selected')
-  if (!fs.existsSync(path.join(request.starterFolder, dataFileName))) {
+  if (!fs.existsSync(path.join(starterFolder, dataFileName))) {
     throw new Error(`Selected data file not found: ${dataFileName}`)
   }
-  if (!findFileNameCaseInsensitive(request.starterFolder, 'Matesel.ini')) throw new Error('Missing Matesel.ini')
+  const iniFile = readMateselIni(starterFolder)
+  if (!iniFile) throw new Error('Missing Matesel.ini')
 
-  const weightingFile = readWeightingFile(request.starterFolder)
-  const parsed = parseInpOneGroupContent(weightingFile.content, weightingFile.fileName)
-
+  const standardRun = readMateSelEndUseMode(iniFile.content) === 0
+  const parsed = standardRun ? null : readEndUseWeightings(starterFolder)
   const needsIni = request.variations.some((spec) => spec.rowId.startsWith('ini:'))
-  const iniFile = needsIni ? readMateselIni(request.starterFolder) : null
-  if (needsIni && !iniFile) throw new Error('Missing Matesel.ini')
-  const parsedIni = iniFile ? parseMateselHistogram(iniFile.content, iniFile.fileName) : null
+  const parsedIni = needsIni ? parseMateselHistogram(iniFile.content, iniFile.fileName) : null
 
   const rowMap = new Map<string, ParsedRow>()
-  for (const row of [...parsed.traits, ...parsed.markers]) rowMap.set(row.id, row)
+  if (parsed) {
+    for (const row of [...parsed.traits, ...parsed.markers]) rowMap.set(row.id, row)
+  }
   for (const row of parsedIni?.rows ?? []) rowMap.set(row.id, row)
 
   const expanded: Array<ExpandedVariation & { row: ParsedRow }> = request.variations.map((spec) => {
@@ -526,7 +531,7 @@ export function generateBatchJobs(request: BatchGeneratePayload): BatchGenerateR
     if (!row) throw new Error(`Unknown weighting row: ${spec.rowId}`)
     if (isIniRow(row)) {
       if (spec.endUseIndex !== 0) throw new Error(`Invalid EndUse index for ${row.name}`)
-    } else if (!Number.isInteger(spec.endUseIndex) || spec.endUseIndex < 0 || spec.endUseIndex >= parsed.endUseCount) {
+    } else if (!Number.isInteger(spec.endUseIndex) || spec.endUseIndex < 0 || spec.endUseIndex >= row.values.length) {
       throw new Error(`Invalid EndUse index for ${row.name}`)
     }
     return { spec, values: expandBatchVariationValues(spec), row }
@@ -552,9 +557,9 @@ export function generateBatchJobs(request: BatchGeneratePayload): BatchGenerateR
     path.join(batchFolder, 'BatchDetails.txt'),
     renderBatchDetails(
       batchFolder,
-      request.starterFolder,
-      parsed.fileName,
-      parsedIni?.fileName ?? 'Matesel.ini',
+      starterFolder,
+      parsed?.fileName,
+      iniFile.fileName,
       generatedAt,
       combinationCount,
       expanded
@@ -581,8 +586,10 @@ export function generateBatchJobs(request: BatchGeneratePayload): BatchGenerateR
 
     const runName = paddedRunName(runIndex + 1, combinationCount)
     const runFolder = path.join(batchFolder, runName)
-    fs.cpSync(request.starterFolder, runFolder, { recursive: true, force: true })
-    fs.writeFileSync(path.join(runFolder, parsed.fileName), renderInpOneGroup(parsed, inpChanges))
+    fs.cpSync(starterFolder, runFolder, { recursive: true, force: true })
+    if (parsed && inpChanges.length > 0) {
+      fs.writeFileSync(path.join(runFolder, parsed.fileName), renderInpOneGroup(parsed, inpChanges))
+    }
     if (parsedIni && iniChanges.length > 0) {
       fs.writeFileSync(path.join(runFolder, parsedIni.fileName), renderMateselIni(parsedIni, iniChanges))
     }
@@ -590,9 +597,9 @@ export function generateBatchJobs(request: BatchGeneratePayload): BatchGenerateR
       path.join(runFolder, 'BatchChanges.txt'),
       renderBatchChanges(
         runName,
-        request.starterFolder,
-        parsed.fileName,
-        parsedIni?.fileName ?? 'Matesel.ini',
+        starterFolder,
+        parsed?.fileName,
+        iniFile.fileName,
         generatedAt,
         changes
       )
@@ -601,9 +608,9 @@ export function generateBatchJobs(request: BatchGeneratePayload): BatchGenerateR
       path.join(runFolder, 'BatchDetails.txt'),
       renderBatchChanges(
         runName,
-        request.starterFolder,
-        parsed.fileName,
-        parsedIni?.fileName ?? 'Matesel.ini',
+        starterFolder,
+        parsed?.fileName,
+        iniFile.fileName,
         generatedAt,
         changes
       )

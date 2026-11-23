@@ -3,6 +3,7 @@ import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { expandBatchVariationValues } from '../shared'
+import { discoverJobFolders, readBatchChanges, validateJobFolder } from './fileManager'
 import {
   generateBatchJobs,
   inspectBatchStarter,
@@ -187,9 +188,64 @@ describe('inspectBatchStarter', () => {
     expect(inspection.iniWarning).toMatch(/histogram table/)
     expect(inspection.valid).toBe(true)
   })
+
+  it('requires EndUse weightings when the configuration enables multiple EndUses', () => {
+    writeFile('Matesel.ini', ` 2 , Switch to control Multiple EndUses\r\n${mateselIni}`)
+    writeFile('DataFile.csv', 'ID,Sex\nA,F\n')
+
+    const inspection = inspectBatchStarter(tempDir)
+
+    expect(inspection.iniRows).toHaveLength(3)
+    expect(inspection.valid).toBe(false)
+    expect(inspection.warnings).toEqual(['Missing EndUses.txt or InpOneGroup.txt with trait and marker weightings'])
+  })
 })
 
 describe('generateBatchJobs', () => {
+  it('generates runnable standard jobs from the commandline files in an exported project', () => {
+    const exportFolder = path.join(tempDir, 'commandline')
+    const config = ` 0 , Switch to control Multiple EndUses\r\n${mateselIni}`
+    const groupConfig = 'Max number of backup sires reported per mating\r\n3\r\n'
+    const csv = 'ID,Sex,g_marker\nA,F,NaN\n'
+    fs.mkdirSync(exportFolder)
+    writeFile('DataFileOriginal.csv', 'original export data')
+    fs.writeFileSync(path.join(exportFolder, 'MateSel.ini'), config)
+    fs.writeFileSync(path.join(exportFolder, 'InpOneGroup.txt'), groupConfig)
+    fs.writeFileSync(path.join(exportFolder, 'MateSel.csv'), csv)
+    const destinationParent = fs.mkdtempSync(path.join(os.tmpdir(), 'matesel-batch-dest-'))
+
+    try {
+      const inspection = inspectBatchStarter(tempDir)
+      expect(inspection).toEqual(inspectBatchStarter(exportFolder))
+      expect(inspection).toMatchObject({ valid: true, warnings: [], dataFileName: 'MateSel.csv', endUseCount: 0 })
+      const progInb = inspection.iniRows.find((row) => row.name === 'ProgInb')!
+      const result = generateBatchJobs({
+        starterFolder: tempDir,
+        destinationParent,
+        selectedDataFileName: inspection.dataFileName,
+        variations: [{ rowId: progInb.id, endUseIndex: 0, mode: 'list', value: '5,25' }]
+      })
+
+      expect(result.generatedFolders).toHaveLength(2)
+      expect(discoverJobFolders([result.batchFolder])).toEqual(result.generatedFolders)
+      for (const [index, folder] of result.generatedFolders.entries()) {
+        const weight = ['5', '25'][index]
+        expect(validateJobFolder(folder)).toEqual({ valid: true, warnings: [] })
+        expect(fs.readFileSync(path.join(folder, 'MateSel.csv'), 'utf8')).toBe(csv)
+        expect(fs.readFileSync(path.join(folder, 'InpOneGroup.txt'), 'utf8')).toBe(groupConfig)
+        expect(fs.readFileSync(path.join(folder, 'MateSel.ini'), 'utf8')).toBe(
+          config.replace('10            0.131162', `${weight.padEnd(2)}            0.131162`)
+        )
+        expect(readBatchChanges(folder)).toEqual([
+          { item: 'ProgInb', type: 'ini', endUse: '', defaultValue: '10', thisRun: weight }
+        ])
+      }
+      expect(fs.readFileSync(path.join(exportFolder, 'MateSel.ini'), 'utf8')).toBe(config)
+    } finally {
+      fs.rmSync(destinationParent, { recursive: true, force: true })
+    }
+  })
+
   it('uses EndUses.txt as the weighting file when InpOneGroup.txt is a separate config file', () => {
     writeFile('Matesel.ini', 'config')
     writeFile('InpOneGroup.txt', 'Max number of backup sires reported per mating\r\n3\r\n')

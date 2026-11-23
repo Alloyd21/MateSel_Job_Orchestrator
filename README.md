@@ -69,6 +69,21 @@ Select **Save**.
 
 The Batch Generator is in development. It copies input files from a starter folder to make jobs. For each job, it changes the selected weightings.
 
+### Standard jobs
+
+1. Select **Batch Generator**.
+2. Select **Select starter**.
+3. Select the standard job folder. For an export, select the project folder or its `commandline` folder.
+4. Select a weighting in the `MateSel.ini` list.
+5. Enter one value, a range, or a list with commas between values.
+6. If the batch has more than 500 jobs, select **Confirm more than 500 runs**.
+7. Select **Generate**.
+8. Select a destination folder.
+
+The Batch Generator changes the **Weighting** column in `MateSel.ini`. MateSel uses a weighting when the **Invoked** value for that item is active.
+
+### Multiple EndUses
+
 1. Select **Batch Generator**.
 2. Select **Select starter**.
 3. Select a starter folder.
@@ -84,6 +99,8 @@ The Batch Generator is in development. It copies input files from a starter fold
 The Batch Generator reads weightings from `EndUses.txt` if it can use that file. If necessary, it reads weightings from `InpOneGroup.txt`. It shows the number of EndUses, traits, and marker loci.
 
 Each EndUse has a column of weightings in the input file. When the number of marker rows is a multiple of 5, the Batch Generator counts 5 rows as one locus. You can change the weighting for each allele or genotype.
+
+### Batch output
 
 The limit for one batch is 1,000 jobs.
 

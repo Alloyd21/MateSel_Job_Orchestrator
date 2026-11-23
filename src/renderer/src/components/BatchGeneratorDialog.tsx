@@ -59,7 +59,8 @@ function isOnlyDataFileWarning(inspection: BatchInspectResult): boolean {
 
 function folderBaseName(folder: string): string {
   const parts = folder.split(/[\\/]/).filter(Boolean)
-  return parts.length > 0 ? parts[parts.length - 1] : ''
+  const name = parts.at(-1) ?? ''
+  return name.toLowerCase() === 'commandline' ? parts.at(-2) ?? name : name
 }
 
 export function BatchGeneratorDialog({ onClose, onGenerated }: BatchGeneratorDialogProps): JSX.Element {
@@ -115,6 +116,7 @@ export function BatchGeneratorDialog({ onClose, onGenerated }: BatchGeneratorDia
     inspection != null &&
     (inspection.valid || isOnlyDataFileWarning(inspection)) &&
     (!inspection.needsDataFile || Boolean(selectedDataFileName))
+  const hasEndUseWeightings = (inspection?.endUseCount ?? 0) > 0
   const sanitizedBatchJobName = sanitizeFolderSegment(batchJobName)
   const batchFolderPreview = sanitizedBatchJobName
     ? `Batch_${sanitizedBatchJobName}_${batchTimestamp}`
@@ -164,7 +166,7 @@ export function BatchGeneratorDialog({ onClose, onGenerated }: BatchGeneratorDia
     setActiveRowId(enabled ? row.id : activeRowId === row.id ? null : activeRowId)
     setDrafts((prev) => {
       const next = { ...prev }
-      for (let index = 0; index < (inspection?.endUseCount ?? 0); index += 1) {
+      for (let index = 0; index < row.values.length; index += 1) {
         const key = keyFor(row.id, index)
         const existing = next[key] ?? defaultDraft(row.values[index] ?? '')
         next[key] = { ...existing, enabled: enabled && index === 0 }
@@ -185,9 +187,7 @@ export function BatchGeneratorDialog({ onClose, onGenerated }: BatchGeneratorDia
   }
 
   const isRowEnabled = (row: BatchWeightingRow): boolean => {
-    return Array.from({ length: inspection?.endUseCount ?? 0 }, (_, index) => drafts[keyFor(row.id, index)]).some(
-      (draft) => draft?.enabled
-    )
+    return row.values.some((_, index) => drafts[keyFor(row.id, index)]?.enabled)
   }
 
   const handleGenerate = async (): Promise<void> => {
@@ -223,9 +223,6 @@ export function BatchGeneratorDialog({ onClose, onGenerated }: BatchGeneratorDia
 
   const renderRowCards = (row: BatchWeightingRow): JSX.Element => {
     const isIni = row.kind === 'ini'
-    const indices = isIni
-      ? [0]
-      : Array.from({ length: inspection?.endUseCount ?? 0 }, (_, index) => index)
     return (
       <div className="flex flex-col gap-4">
         <div>
@@ -234,16 +231,16 @@ export function BatchGeneratorDialog({ onClose, onGenerated }: BatchGeneratorDia
         </div>
 
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-          {indices.map((index) => {
+          {row.values.map((value, index) => {
             const key = keyFor(row.id, index)
-            const draft = drafts[key] ?? defaultDraft(row.values[index] ?? '')
+            const draft = drafts[key] ?? defaultDraft(value)
             return (
               <div key={key} className="rounded border border-slate-700 bg-slate-950 p-3">
                 <label className="flex items-center justify-between gap-2">
                   <span className="text-xs font-semibold text-slate-200">
                     {isIni ? 'Weighting' : `EndUse ${index + 1}`}
                   </span>
-                  <span className="font-mono text-[11px] text-slate-500">default {row.values[index]}</span>
+                  <span className="font-mono text-[11px] text-slate-500">default {value}</span>
                   <input
                     type="checkbox"
                     checked={draft.enabled}
@@ -367,7 +364,7 @@ export function BatchGeneratorDialog({ onClose, onGenerated }: BatchGeneratorDia
           <div>
             <h2 className="text-base font-semibold text-slate-100">Batch Weighting Generator</h2>
             <p className="mt-0.5 text-xs text-slate-400">
-              Generate ready jobs from one starter folder by varying trait and marker weights.
+              Generate ready jobs from one starter folder by varying weightings.
             </p>
           </div>
           <button
@@ -394,9 +391,13 @@ export function BatchGeneratorDialog({ onClose, onGenerated }: BatchGeneratorDia
                 </div>
                 {inspection && (
                   <div className="mt-0.5 text-xs text-slate-400">
-                    <span>
-                      {inspection.endUseCount} EndUses, {inspection.traits.length} traits, {inspection.markerLocusCount} marker loci
-                    </span>
+                    {hasEndUseWeightings ? (
+                      <span>
+                        {inspection.endUseCount} EndUses, {inspection.traits.length} traits, {inspection.markerLocusCount} marker loci
+                      </span>
+                    ) : inspection.iniRows.length > 0 && (
+                      <span>{inspection.iniRows.length} weightings in MateSel.ini</span>
+                    )}
                     {inspection.weightingFileName && (
                       <span className="ml-2 font-mono text-[10px] text-slate-500">
                         weights: {inspection.weightingFileName}
@@ -554,7 +555,7 @@ export function BatchGeneratorDialog({ onClose, onGenerated }: BatchGeneratorDia
                 ← Back
               </button>
             )}
-            {inspection && step === 'ini' ? (
+            {hasEndUseWeightings && step === 'ini' ? (
               <button
                 onClick={() => setStep('enduses')}
                 disabled={!hasUsableStarter}

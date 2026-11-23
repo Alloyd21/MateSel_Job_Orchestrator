@@ -222,6 +222,11 @@ export function discoverJobFolders(folderPaths: string[]): string[] {
   return [...discovered].sort((a, b) => a.localeCompare(b))
 }
 
+export function readMateSelEndUseMode(config: string): number | undefined {
+  const match = config.match(/^\s*(\d+)\s*,\s*Switch to control Multiple EndUses\b/im)
+  return match ? Number(match[1]) : undefined
+}
+
 export function validateJobFolder(
   folderPath: string
 ): { valid: boolean; warnings: string[]; needsDataFile?: boolean; files?: string[] } {
@@ -240,8 +245,8 @@ export function validateJobFolder(
     }
   }
   const config = fs.readFileSync(path.join(folderPath, configFileName), 'utf8')
-  const endUseMode = config.match(/^\s*(\d+)\s*,\s*Switch to control Multiple EndUses\b/im)
-  if (endUseMode && Number(endUseMode[1]) > 0 && !findFileNameCaseInsensitive(folderPath, 'EndUses.txt')) {
+  const endUseMode = readMateSelEndUseMode(config)
+  if (endUseMode && !findFileNameCaseInsensitive(folderPath, 'EndUses.txt')) {
     warnings.push('Missing EndUses.txt')
   }
   if (!findFileNameCaseInsensitive(folderPath, 'InpOneGroup.txt')) warnings.push('Missing InpOneGroup.txt')
